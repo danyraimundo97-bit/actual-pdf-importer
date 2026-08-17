@@ -1,5 +1,6 @@
 import * as actualApi from '@actual-app/api';
 import { RawTransaction } from './types';
+import { lookupCategory, rememberCategories } from './categorydb';
 
 interface ActualConfig {
   serverURL: string;
@@ -44,19 +45,71 @@ export async function importToActual(
   config: ActualConfig,
   accountId: string,
   transactions: RawTransaction[],
-): Promise<{ added: number; updated: number }> {
+): Promise<{ added: number; updated: number; categorized: number }> {
   await ensureInitialized(config);
 
-  const payload = transactions.map((tx) => ({
-    date: tx.date,               // already YYYY-MM-DD from the parsers
-    amount: tx.amountCents,      // already integer cents from the parsers
-    payee_name: tx.payee,
-    imported_id: deriveImportedId(tx),
-    notes: tx.rawLine,           // keep the original line for auditability
-  }));
+  let categorized = 0;
+  const payload = transactions.map((tx) => {
+    // Pre-fill the category from local memory (see categorydb.ts) if we've
+    // seen this exact payee before — either taught directly or learned
+    // from Actual's own already-categorized transactions. If we haven't,
+    // the transaction still imports fine, just uncategorized (or caught
+    // later by Actual's own rules, if any match).
+    const match = lookupCategory(tx.payee);
+    if (match) categorized++;
+
+    return {
+      date: tx.date,               // already YYYY-MM-DD from the parsers
+      amount: tx.amountCents,      // already integer cents from the parsers
+      payee_name: tx.payee,
+      category: match?.categoryId,
+      imported_id: deriveImportedId(tx),
+      notes: tx.rawLine,           // keep the original line for auditability
+    };
+  });
 
   const result = await actualApi.importTransactions(accountId, payload);
-  return { added: result.added?.length ?? 0, updated: result.updated?.length ?? 0 };
+  return {
+    added: result.added?.length ?? 0,
+    updated: result.updated?.length ?? 0,
+    categorized,
+  };
+}
+
+/**
+ * Syncs the category memory (categorydb.ts) FROM Actual: pulls
+ * already-categorized transactions for an account/date-range, and for
+ * every payee that has a category assigned, remembers that mapping
+ * locally. This is how the memory gets built without a manual admin UI —
+ * categorize normally in the Actual app once, then call this to backfill.
+ */
+export async function learnCategoriesFromActual(
+  config: ActualConfig,
+  accountId: string,
+  startDate: string,
+  endDate: string,
+): Promise<{ learned: number; scanned: number }> {
+  await ensureInitialized(config);
+
+  const [categories, payees, transactions] = await Promise.all([
+    actualApi.getCategories(),
+    actualApi.getPayees(),
+    actualApi.getTransactions(accountId, startDate, endDate),
+  ]);
+
+  const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+  const payeeNameById = new Map(payees.map((p) => [p.id, p.name]));
+
+  const entries: Array<{ payee: string; categoryId: string; categoryName?: string }> = [];
+  for (const tx of transactions) {
+    if (!tx.category || !tx.payee) continue;
+    const payeeName = payeeNameById.get(tx.payee);
+    if (!payeeName) continue;
+    entries.push({ payee: payeeName, categoryId: tx.category, categoryName: categoryNameById.get(tx.category) });
+  }
+
+  const learned = rememberCategories(entries);
+  return { learned, scanned: transactions.length };
 }
 
 export async function shutdownActual() {

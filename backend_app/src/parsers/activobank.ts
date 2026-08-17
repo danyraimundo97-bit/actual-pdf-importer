@@ -39,11 +39,11 @@ function cleanPayee(rawPayee: string): string {
 export const activoBankParser: BankParser = {
   bankId: 'activobank',
 
-  canParse(fullText: string): boolean {
+  canParse(fullText: any): boolean {
     return /activobank/i.test(fullText) || /activo\s*bank/i.test(fullText);
   },
 
-  parse(fullText: string): RawTransaction[] {
+  parse(fullText: any): RawTransaction[] {
     const transactions: RawTransaction[] = [];
     const lines = fullText.split('\n');
 
