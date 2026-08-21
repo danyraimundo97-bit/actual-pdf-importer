@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android's network-security-config only allowlists cleartext traffic by
+  exact hostname/domain — it has no way to express "any private LAN IP",
+  and the importer backend's address is whatever the user types into
+  Settings at runtime, which can't be known at build time. So this allows
+  cleartext everywhere rather than pretending to scope it to a LAN range
+  the config format can't actually express.
+
+  If you want this closed off, put the backend behind a reverse proxy
+  with a real TLS certificate and point the app at an https:// URL
+  instead — then this file and the corresponding manifest attribute can
+  both be deleted.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

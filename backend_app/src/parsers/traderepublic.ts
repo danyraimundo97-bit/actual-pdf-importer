@@ -59,7 +59,7 @@ export const tradeRepublicParser: BankParser = {
   },
 
   parse(fullText: any): RawTransaction[] {
-    const lines = fullText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const lines = fullText.split('\n').map((l: string) => l.trim()).filter(Boolean);
     const transactions: RawTransaction[] = [];
 
     // Group lines into blocks: each block starts at a line beginning with a

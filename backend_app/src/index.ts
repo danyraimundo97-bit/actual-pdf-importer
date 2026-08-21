@@ -1,5 +1,6 @@
 import pdfParse from 'pdf-parse';
 import { BankParser, RawTransaction } from './types';
+import { UnrecognizedBankError, PdfPasswordRequiredError, PdfPasswordIncorrectError } from './errors';
 import { activoBankParser } from './parsers/activobank';
 import { moeyParser } from './parsers/moey';
 import { tradeRepublicParser } from './parsers/traderepublic';
@@ -16,7 +17,10 @@ export type ParserMode = 'regex' | 'ai' | 'both';
  *   - "ai": every statement skips local text extraction entirely and its
  *     raw PDF bytes go straight to the configured AI provider (see
  *     processStatement() below) — the model reasons over the real layout
- *     instead of a pdf-parse text dump.
+ *     instead of a pdf-parse text dump. Exception: a password-protected
+ *     statement in this mode still has to go through local text
+ *     extraction first (see processStatement) since the AI provider has
+ *     no way to decrypt it.
  *   - "both": regex parsers run first (cheap, local, on extracted text);
  *     the AI parser is a text-based fallback only for statements none of
  *     them recognized — it reuses the text already extracted for the
@@ -38,8 +42,9 @@ function buildTextParserList(mode: ParserMode): BankParser[] {
     case 'both':
       return [...REGEX_PARSERS, aiParser];
     case 'ai':
-      // Not used for text: PARSER_MODE=ai goes through the direct-PDF path
-      // in processStatement() instead of this text-based parser chain.
+      // Not used for the direct-PDF path in processStatement() — only
+      // reached when an "ai"-mode statement turns out to be
+      // password-protected and has to fall back to text extraction.
       return [aiParser];
   }
 }
@@ -65,22 +70,16 @@ if (PARSER_MODE === 'ai' || PARSER_MODE === 'both') {
 
 console.log(
   PARSER_MODE === 'ai'
-    ? `[parsers] PARSER_MODE=ai — PDFs go straight to AI provider "${getAiProvider().name}", no local text extraction.`
+    ? `[parsers] PARSER_MODE=ai — PDFs go straight to AI provider "${getAiProvider().name}", no local text extraction (unless a statement turns out to be password-protected).`
     : `[parsers] PARSER_MODE=${PARSER_MODE} — active parsers: ${TEXT_PARSERS.map((p) => p.bankId).join(', ')}`,
 );
-
-export class UnrecognizedBankError extends Error {
-  constructor() {
-    super('Could not identify which bank this statement is from.');
-    this.name = 'UnrecognizedBankError';
-  }
-}
 
 /**
  * Picks a parser by content sniffing rather than trusting a filename or
  * user-supplied hint, since PDFs get renamed/forwarded and a wrong guess
  * here silently corrupts every transaction downstream. Only used for the
- * text-based paths ("regex" and "both").
+ * text-based paths ("regex" and "both", or "ai" degraded to text — see
+ * processStatement()).
  */
 export async function identifyAndParse(
   fullText: string,
@@ -94,22 +93,54 @@ export async function identifyAndParse(
 }
 
 /**
+ * Runs pdf-parse's local text extraction, optionally against a
+ * password-protected PDF.
+ *
+ * pdf-parse forwards its first argument verbatim into pdf.js's own
+ * `getDocument()`, which accepts either a raw buffer or a params object —
+ * `{ data, password }` is how an encrypted statement's password reaches
+ * pdf.js, even though pdf-parse's own README never mentions it.
+ * @types/pdf-parse only declares the Buffer overload, hence the cast; do
+ * not "simplify" this back to passing the buffer directly, or encrypted
+ * statements silently stop working.
+ */
+async function extractText(pdfBuffer: Buffer, password?: string): Promise<string> {
+  try {
+    const { text } = await pdfParse({ data: pdfBuffer, password } as unknown as Buffer);
+    return text;
+  } catch (err) {
+    const code = (err as { code?: number }).code;
+    if (code === 1) throw new PdfPasswordRequiredError();
+    if (code === 2) throw new PdfPasswordIncorrectError();
+    throw err;
+  }
+}
+
+/**
  * Single entry point server.ts calls with the uploaded PDF's raw bytes.
  * Decides, based on PARSER_MODE, whether to extract text locally first
- * (regex/both) or send the PDF straight to the AI provider (ai).
+ * (regex/both, or ai-with-a-password) or send the PDF straight to the AI
+ * provider (ai, unencrypted).
  */
 export async function processStatement(
   pdfBuffer: Buffer,
+  password?: string,
 ): Promise<{ bankId: BankParser['bankId']; transactions: RawTransaction[] }> {
-  if (PARSER_MODE === 'ai') {
+  if (PARSER_MODE === 'ai' && !password) {
     const transactions = await parseAiFromPdf(pdfBuffer);
     return { bankId: 'ai', transactions };
   }
 
-  // regex or both: extract text locally first — nothing leaves the machine
-  // for this step — then run it through the parser chain.
-  const { text } = await pdfParse(pdfBuffer);
+  // regex / both, or an "ai"-mode statement that needs a password: extract
+  // text locally — nothing leaves the machine for this step — then run it
+  // through the text-based parser chain. In pure "ai" mode with a
+  // password that chain is just [aiParser] (see buildTextParserList):
+  // lower fidelity than sending the raw PDF, but it reuses code that
+  // already exists for PARSER_MODE=both rather than adding a PDF
+  // decryption dependency to the backend.
+  const text = await extractText(pdfBuffer, password);
   return identifyAndParse(text);
 }
 
 export * from './types';
+export * from './errors';

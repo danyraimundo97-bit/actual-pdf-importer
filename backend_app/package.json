@@ -6,7 +6,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "test": "node --test dist"
+    "test": "node --test 'dist/**/*.test.js'"
   },
   "dependencies": {
     "@actual-app/api": "^6.8.1",
