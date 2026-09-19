@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repo has two independent projects with no shared build/tooling:
 
 - `backend_app/` — Node.js/TypeScript/Express bridge that parses bank statement PDFs and imports transactions into [Actual Budget](https://actualbudget.org) via `@actual-app/api`.
-- `mobile_app/` — Flutter app (Riverpod + go_router) that is the client for that backend: upload a statement, review parsed transactions, confirm the import.
+- `mobile_app/` — Flutter app (Riverpod + go_router) that is the client for that backend: upload a statement, review parsed transactions, confirm/ the import.
 
 Everything below a project's own directory should be treated as that project's scope; there's no monorepo tooling tying them together.
 
