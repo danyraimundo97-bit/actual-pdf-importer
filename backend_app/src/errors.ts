@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'PDF_PASSWORD_REQUIRED'
   | 'PDF_PASSWORD_INCORRECT'
   | 'MISSING_FIELD'
+  | 'NO_BUDGET_SELECTED'
   | 'UNAUTHORIZED'
   | 'INTERNAL_ERROR';
 
@@ -44,5 +45,21 @@ export class PdfPasswordRequiredError extends ImporterError {
 export class PdfPasswordIncorrectError extends ImporterError {
   constructor() {
     super('PDF_PASSWORD_INCORRECT', 'Wrong password for this statement.', 422);
+  }
+}
+
+/**
+ * No budget to work with: neither the request nor ACTUAL_BUDGET_SYNC_ID in
+ * .env named one. Its own code because this is the ordinary first-run state
+ * — without it an empty sync id reaches downloadBudget() and the client
+ * gets an opaque SDK failure instead of "pick a budget".
+ */
+export class NoBudgetSelectedError extends ImporterError {
+  constructor() {
+    super(
+      'NO_BUDGET_SELECTED',
+      'No budget selected: pass "budgetSyncId" or set ACTUAL_BUDGET_SYNC_ID in the backend .env.',
+      400,
+    );
   }
 }

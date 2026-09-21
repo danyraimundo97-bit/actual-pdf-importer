@@ -1,2 +1,3 @@
 backend_app/.env
 backend_app/.env.dev
+backend_app/Docs/tests

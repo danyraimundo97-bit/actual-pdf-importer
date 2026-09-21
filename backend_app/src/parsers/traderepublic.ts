@@ -54,11 +54,11 @@ function parseFlexibleAmountToCents(raw: string): number {
 export const tradeRepublicParser: BankParser = {
   bankId: 'traderepublic',
 
-  canParse(fullText: any): boolean {
+  canParse(fullText: string): boolean {
     return /trade\s*republic/i.test(fullText);
   },
 
-  parse(fullText: any): RawTransaction[] {
+  parse(fullText: string): RawTransaction[] {
     const lines = fullText.split('\n').map((l: string) => l.trim()).filter(Boolean);
     const transactions: RawTransaction[] = [];
 

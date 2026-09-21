@@ -23,10 +23,10 @@ cp .env.example .env        # fill in ACTUAL_* values; see comments in the file
 npm run dev                 # ts-node-dev, auto-restarts on change
 npm run build                # tsc -> dist/
 npm start                    # node dist/server.js (run build first)
-npm test                     # node --test 'dist/**/*.test.js' — MUST run `npm run build` first, tests execute from dist/, not src/
+npm test                     # builds first (pretest hook), then node --test "dist/**/*.test.js"
 ```
 
-There is no single-test-file npm script; run one compiled test directly, e.g. `node --test dist/__tests__/categorydb.test.js` (after `npm run build`).
+Tests execute from `dist/`, not `src/` — the `pretest` hook rebuilds so a stale `dist/` can't report a false pass. There is no single-test-file npm script; run one compiled test directly, e.g. `npm run build && node --test dist/__tests__/categorydb.test.js`.
 
 `GET /health` returns `{ "status": "ok" }` once the server is running — no auth required on that one route.
 
@@ -41,14 +41,16 @@ There is no single-test-file npm script; run one compiled test directly, e.g. `n
 - Password-protected PDFs: `PARSER_MODE=ai` can't send encrypted bytes straight to a provider (no way to decrypt them), so that one statement transparently downgrades to local text extraction + the text-based AI parser. pdf.js password error codes map to `PdfPasswordRequiredError` (code 1) / `PdfPasswordIncorrectError` (code 2) in `src/errors.ts`.
 
 **Two import flows**, both in `src/server.ts`:
-- Recommended: `POST /parse` (extracts + returns transactions with a `suggestedCategoryId`/dedupe `importedId`, does *not* touch Actual) → client reviews/edits → `POST /import/confirm` (JSON, actually imports). Editing a transaction's date/amount/payee client-side and re-submitting must still pass back the original `importedId` unchanged, since that id is derived from those three fields (`deriveImportedId` in `src/actual.ts`) and re-deriving it after an edit breaks dedupe on re-import of the same statement.
+- Recommended: `POST /parse` (extracts + returns transactions with a `suggestedCategoryId`/dedupe `importedId`, does *not* touch Actual) → client reviews/edits → `POST /import/confirm` (JSON, actually imports). Editing a transaction's date/amount/payee client-side and re-submitting must still pass back the original `importedId` unchanged, since that id is derived from those three fields and re-deriving it after an edit breaks dedupe on re-import of the same statement. Ids are stamped by `assignImportedIds` (`src/actual.ts`) over the **whole statement at once**, never per transaction: date+amount+payee is not unique within a real statement (banks truncate the payee column, and repeat transfers on one day are ordinary), so repeats of one basis are numbered as they are found. Occurrence 0 keeps the pre-numbering id, and `actual.test.ts` pins those ids as literals — changing the basis or the hash silently duplicates every past import.
 - Legacy: `POST /import` (multipart, parse+import in one call, no review step). Kept for backwards compatibility only.
 
-**`src/actual.ts`** wraps `@actual-app/api`, which holds exactly one global connection to one downloaded budget at a time. `ensureInitialized()`/`ensureServerInitialized()` serialize all init/budget-download calls through a single promise queue (`queue`) so concurrent requests for different budgets don't race into a half-swapped state, and a budget that's already loaded is never redundantly re-downloaded.
+**Budget session** (`src/budget-session.ts`, term defined in `CONTEXT.md`) owns the one global connection `@actual-app/api` allows: one downloaded budget at a time. All Actual work runs as `session.withBudget(budget, fn)` (or `withServer(fn)` when no budget is needed): turns are strictly serialized and the *whole callback* runs inside the turn, so another request can't swap the budget mid-operation. A budget that's already loaded isn't re-downloaded; a failed download marks nothing as loaded. Never call `withBudget`/`withServer` from inside a callback (deadlock). The session is created once in `server.ts` from the `ACTUAL_*` env vars; `src/actual-adapter.ts` is the only file that drives the SDK's lifecycle (init/download/shutdown), and callbacks only see the narrow `ActualPort` type. Tests use a fake `ActualAdapter` (`src/__tests__/budget-session.test.ts`).
+
+**`src/actual.ts`** holds the domain operations (`importToActual`, `learnCategoriesFromActual`, `listAccounts`, `listCategoryGroups`, `listBudgets`, `assignImportedIds`); each takes the `BudgetSession` and a `BudgetRef` (`{ syncId, budgetPassword? }`) instead of touching the SDK directly.
 
 **`src/categorydb.ts`** is a local SQLite-backed payee→category memory (not Actual's own category data), scoped per `budgetSyncId` with an "unscoped" fallback for mappings created before scoping existed. It's a complement to Actual's fuzzy rules engine, not a replacement — matching here is exact on cleaned/normalized payee text. Populated either directly (`POST /categories`) or backfilled from already-categorized Actual transactions (`POST /categories/learn-from-actual`, implemented as `learnCategoriesFromActual` in `src/actual.ts`).
 
-**Errors** (`src/errors.ts`): route handlers throw a typed `ImporterError` subclass (never a plain `Error`, for expected failure modes); `server.ts`'s `sendImporterError()` maps it straight to a JSON response with a stable machine-readable `code` field. Clients should branch on `code`, never on the English `error` message.
+**Errors** (`src/errors.ts`): route handlers throw a typed `ImporterError` subclass (never a plain `Error`, for expected failure modes); `server.ts`'s `sendImporterError()` maps it straight to a JSON response with a stable machine-readable `code` field. Clients should branch on `code`, never on the English `error` message. `resolveBudgetRef` in `server.ts` is where an unset budget becomes `NO_BUDGET_SELECTED` (400) rather than an empty sync id reaching `downloadBudget()`; routes that only need the category-memory scope key use `resolveBudgetScope`, where empty is legitimate.
 
 **Auth**: a single shared-secret header, `X-Import-Token`, checked with `crypto.timingSafeEqual` (`src/server.ts`). Every route requires it except `GET /health`. Leaving `IMPORT_TOKEN` unset in `.env` disables auth entirely (loudly logged at startup) — acceptable for local testing only.
 

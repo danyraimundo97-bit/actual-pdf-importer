@@ -3,18 +3,18 @@ import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
 import { processStatement, PARSER_MODE } from './index';
-import { ImporterError } from './errors';
+import { ImporterError, NoBudgetSelectedError } from './errors';
 import { getAiProvider } from './parsers/ai-providers';
 import {
-  ActualConfig,
-  deriveImportedId,
+  assignImportedIds,
   importToActual,
   learnCategoriesFromActual,
   listAccounts,
   listBudgets,
   listCategoryGroups,
-  shutdownActual,
 } from './actual';
+import { actualSdkAdapter } from './actual-adapter';
+import { BudgetRef, createBudgetSession } from './budget-session';
 import { deleteCategoryMapping, listCategoryMappings, lookupCategory, rememberCategory } from './categorydb';
 
 const app = express();
@@ -28,23 +28,40 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
 });
 
-const DEFAULT_ACTUAL_CONFIG = {
-  serverURL: process.env.ACTUAL_SERVER_URL ?? 'http://localhost:5006',
-  password: process.env.ACTUAL_PASSWORD ?? '',
-  dataDir: process.env.ACTUAL_DATA_DIR ?? './actual-cache',
-  budgetSyncId: process.env.ACTUAL_BUDGET_SYNC_ID ?? '',
-};
+// Server credentials never vary per request, so they're fixed when the
+// budget session is created; only the budget choice is per-request.
+const budgetSession = createBudgetSession(
+  {
+    serverURL: process.env.ACTUAL_SERVER_URL ?? 'http://localhost:5006',
+    password: process.env.ACTUAL_PASSWORD ?? '',
+    dataDir: process.env.ACTUAL_DATA_DIR ?? './actual-cache',
+  },
+  actualSdkAdapter,
+);
+
+const DEFAULT_BUDGET_SYNC_ID = process.env.ACTUAL_BUDGET_SYNC_ID ?? '';
 
 /**
- * Builds the ActualConfig for a single request, honoring a per-request
- * budget override (the budget picker in Settings) while falling back to
- * the .env default when the client doesn't specify one.
+ * The budget a request is scoped to, honoring a per-request override (the
+ * budget picker in Settings) and falling back to the .env default. May be
+ * empty: that's a legitimate state for the category memory, which has an
+ * unscoped bucket for mappings made before scoping existed (categorydb.ts).
  */
-function resolveActualConfig(budgetSyncId?: unknown, budgetPassword?: unknown): ActualConfig {
+function resolveBudgetScope(budgetSyncId?: unknown): string {
   const override = typeof budgetSyncId === 'string' ? budgetSyncId.trim() : '';
+  return override || DEFAULT_BUDGET_SYNC_ID;
+}
+
+/**
+ * Same choice, but as a reference to a budget Actual must actually open —
+ * so here an empty sync id is not a valid answer and gets rejected with a
+ * code the client can branch on, rather than reaching downloadBudget('').
+ */
+function resolveBudgetRef(budgetSyncId?: unknown, budgetPassword?: unknown): BudgetRef {
+  const syncId = resolveBudgetScope(budgetSyncId);
+  if (!syncId) throw new NoBudgetSelectedError();
   return {
-    ...DEFAULT_ACTUAL_CONFIG,
-    budgetSyncId: override || DEFAULT_ACTUAL_CONFIG.budgetSyncId,
+    syncId,
     budgetPassword: typeof budgetPassword === 'string' && budgetPassword ? budgetPassword : undefined,
   };
 }
@@ -105,7 +122,7 @@ app.post('/parse', upload.single('statement'), async (req: Request, res: Respons
   }
 
   const password = typeof req.body.password === 'string' && req.body.password ? req.body.password : undefined;
-  const budgetSyncId = resolveActualConfig(req.body.budgetSyncId).budgetSyncId;
+  const budgetSyncId = resolveBudgetScope(req.body.budgetSyncId);
 
   try {
     const { bankId, transactions } = await processStatement(req.file.buffer, password);
@@ -118,11 +135,10 @@ app.post('/parse', upload.single('statement'), async (req: Request, res: Respons
       });
     }
 
-    const enriched = transactions.map((tx) => {
+    const enriched = assignImportedIds(transactions).map((tx) => {
       const match = lookupCategory(tx.payee, budgetSyncId);
       return {
         ...tx,
-        importedId: deriveImportedId(tx),
         suggestedCategoryId: match?.categoryId,
         suggestedCategoryName: match?.categoryName,
       };
@@ -151,8 +167,12 @@ app.post('/import/confirm', async (req: Request, res: Response) => {
   }
 
   try {
-    const config = resolveActualConfig(budgetSyncId, budgetPassword);
-    const result = await importToActual(config, accountId, transactions);
+    const result = await importToActual(
+      budgetSession,
+      resolveBudgetRef(budgetSyncId, budgetPassword),
+      accountId,
+      transactions,
+    );
     return res.json(result);
   } catch (err) {
     sendImporterError(res, err, 'Internal error while importing to Actual.');
@@ -179,9 +199,9 @@ app.post('/import', upload.single('statement'), async (req: Request, res: Respon
   }
 
   const password = typeof req.body.password === 'string' && req.body.password ? req.body.password : undefined;
-  const config = resolveActualConfig(req.body.budgetSyncId, req.body.budgetPassword);
 
   try {
+    const budget = resolveBudgetRef(req.body.budgetSyncId, req.body.budgetPassword);
     const { bankId, transactions } = await processStatement(req.file.buffer, password);
 
     if (transactions.length === 0) {
@@ -192,7 +212,7 @@ app.post('/import', upload.single('statement'), async (req: Request, res: Respon
       });
     }
 
-    const result = await importToActual(config, accountId, transactions);
+    const result = await importToActual(budgetSession, budget, accountId, transactions);
 
     return res.json({
       bankId,
@@ -210,8 +230,7 @@ app.post('/import', upload.single('statement'), async (req: Request, res: Respon
 
 app.get('/accounts', async (req: Request, res: Response) => {
   try {
-    const config = resolveActualConfig(req.query.budgetSyncId);
-    const accounts = await listAccounts(config);
+    const accounts = await listAccounts(budgetSession, resolveBudgetRef(req.query.budgetSyncId));
     res.json({ accounts });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while listing Actual accounts.');
@@ -220,8 +239,7 @@ app.get('/accounts', async (req: Request, res: Response) => {
 
 app.get('/actual/categories', async (req: Request, res: Response) => {
   try {
-    const config = resolveActualConfig(req.query.budgetSyncId);
-    const groups = await listCategoryGroups(config);
+    const groups = await listCategoryGroups(budgetSession, resolveBudgetRef(req.query.budgetSyncId));
     res.json({ groups });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while listing Actual categories.');
@@ -230,7 +248,7 @@ app.get('/actual/categories', async (req: Request, res: Response) => {
 
 app.get('/budgets', async (_req: Request, res: Response) => {
   try {
-    const budgets = await listBudgets(DEFAULT_ACTUAL_CONFIG);
+    const budgets = await listBudgets(budgetSession);
     res.json({ budgets });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while listing Actual budgets.');
@@ -244,14 +262,14 @@ app.get('/config', (_req: Request, res: Response) => {
     parserMode: PARSER_MODE,
     aiProvider: provider?.name,
     aiConfigured: provider ? provider.isConfigured() : false,
-    defaultBudgetSyncId: DEFAULT_ACTUAL_CONFIG.budgetSyncId || undefined,
+    defaultBudgetSyncId: DEFAULT_BUDGET_SYNC_ID || undefined,
   });
 });
 
 // --- Category memory (see src/categorydb.ts) ---------------------------
 
 app.get('/categories', (req: Request, res: Response) => {
-  const budgetSyncId = resolveActualConfig(req.query.budgetSyncId).budgetSyncId;
+  const budgetSyncId = resolveBudgetScope(req.query.budgetSyncId);
   res.json({ mappings: listCategoryMappings(budgetSyncId) });
 });
 
@@ -260,12 +278,12 @@ app.post('/categories', (req: Request, res: Response) => {
   if (!payee || !categoryId) {
     return res.status(400).json({ error: 'Both "payee" and "categoryId" are required.', code: 'MISSING_FIELD' });
   }
-  rememberCategory(payee, categoryId, categoryName, resolveActualConfig(budgetSyncId).budgetSyncId);
+  rememberCategory(payee, categoryId, categoryName, resolveBudgetScope(budgetSyncId));
   res.status(204).end();
 });
 
 app.delete('/categories/:payee', (req: Request, res: Response) => {
-  const budgetSyncId = resolveActualConfig(req.query.budgetSyncId).budgetSyncId;
+  const budgetSyncId = resolveBudgetScope(req.query.budgetSyncId);
   const deleted = deleteCategoryMapping(req.params.payee, budgetSyncId);
   res.status(deleted ? 204 : 404).end();
 });
@@ -283,8 +301,13 @@ app.post('/categories/learn-from-actual', async (req: Request, res: Response) =>
     });
   }
   try {
-    const config = resolveActualConfig(budgetSyncId, budgetPassword);
-    const result = await learnCategoriesFromActual(config, accountId, startDate, endDate);
+    const result = await learnCategoriesFromActual(
+      budgetSession,
+      resolveBudgetRef(budgetSyncId, budgetPassword),
+      accountId,
+      startDate,
+      endDate,
+    );
     res.json(result);
   } catch (err) {
     sendImporterError(res, err, 'Internal error while syncing categories from Actual.');
@@ -300,8 +323,26 @@ const server = app.listen(PORT, () => {
 
 // Actual's API keeps a local sqlite cache open; shut it down cleanly so it
 // doesn't leave a stale lock file if you restart the process a lot during
-// development.
-process.on('SIGINT', async () => {
-  await shutdownActual();
+// development. shutdown() waits for any in-flight Actual work (so it never
+// kills an import halfway); if that work hangs, a second signal force-quits.
+//
+// SIGTERM as well as SIGINT: a container or service manager stopping the
+// process sends SIGTERM, and that is exactly the restart-often case the
+// clean shutdown exists for.
+let shuttingDown = false;
+async function shutdownGracefully(signal: string) {
+  if (shuttingDown) process.exit(1);
+  shuttingDown = true;
+  console.log(`
+[server] ${signal} received — closing the Actual connection...`);
+  try {
+    await budgetSession.shutdown();
+  } catch (err) {
+    console.error('Error while shutting down the Actual connection:', err);
+  }
   server.close(() => process.exit(0));
-});
+}
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => void shutdownGracefully(signal));
+}
