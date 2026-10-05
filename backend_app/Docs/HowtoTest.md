@@ -30,10 +30,11 @@ file.
 
 ### What's covered today
 
-37 tests across eight files:
+45 tests across nine files:
 
 | File | Covers |
 | --- | --- |
+| `statement-batch.test.ts` | Per-file isolation of failures, `NO_TRANSACTIONS` keeping its `bankId`, no leaking of unexpected error text, sequential ordering, and the per-statement dedupe-id rule |
 | `activobank.test.ts` | Three-line movements, year from the period header (incl. rollover), the balance-driven amount/balance split, payee prefixes, skip-and-resync on an unresolvable row, `canParse` rejection of a mere mention |
 | `traderepublic.test.ts` | Two-line dates, wrapped types, direction from the balance delta, a description ending in a digit, mid-table page footer, missing-anchor degradation, `canParse` rejection of a truncated payee mention |
 | `actual.test.ts` | `importToActual` payload mapping, `listAccounts`/`listBudgets`/`listCategoryGroups`, and the `assignImportedIds` dedupe rules — including **golden id literals** |
@@ -62,8 +63,9 @@ Judge the run by the trailing `pass`/`fail` counts.
 
 ### Known gaps
 
-- **No HTTP-level tests.** Nothing exercises `server.ts` routes, auth, or error mapping; those
-  are only covered by the manual flow below.
+- **No HTTP-level tests.** Route wiring, auth, and the multer→`code` mapping are only covered by
+  the manual flow below. Batch *orchestration* is unit-tested (`statement-batch.test.ts`) because
+  it lives outside the route handler, but nothing asserts the handler calls it correctly.
 - **No AI-provider tests.** `src/parsers/ai-providers/` is untested.
 - **Fixtures are synthetic.** All three parsers are verified against real statements only by
   hand, via the reconciliation procedure below. Nothing in `npm test` reads `Docs/tests/`
@@ -157,11 +159,49 @@ Useful response codes:
 | Code | Means |
 | --- | --- |
 | `MISSING_FIELD` | No file, or the field wasn't called `statement` |
-| `UNRECOGNIZED_BANK` | No parser's `canParse` matched |
+| `BANK_UNRECOGNIZED` | No parser's `canParse` matched |
 | `NO_TRANSACTIONS` | A parser claimed the statement but extracted zero rows — the layout changed |
 | `PDF_PASSWORD_REQUIRED` / `PDF_PASSWORD_INCORRECT` | Encrypted PDF |
+| `PDF_UNREADABLE` | Not a PDF, or corrupt |
+| `FILE_TOO_LARGE` / `TOO_MANY_FILES` | Rejected by the upload limits before parsing |
 
 Branch on `code`, never on the English `error` text.
+
+### 2b. Parse several statements in one call
+
+`POST /parse/batch` takes the field `statements`, repeated — a month of exports, or one per
+account:
+
+```bash
+curl -X POST http://localhost:3000/parse/batch \
+  -H "X-Import-Token: $IMPORT_TOKEN" \
+  -F "statements=@Docs/tests/Moey - julho 2026.pdf" \
+  -F "statements=@Docs/tests/Activo bank  - Maio 2026.pdf" \
+  -F "statements=@Docs/tests/Trade Republic - Agosto 2026.pdf"
+```
+
+```json
+{ "files": [ { "filename": "...", "status": "parsed", "bankId": "moey", "transactions": [...] },
+             { "filename": "...", "status": "failed", "code": "PDF_UNREADABLE", "error": "..." } ],
+  "parsed": 2, "failed": 1, "transactions": 175 }
+```
+
+Things to check when testing it:
+
+- **Partial success returns 200.** One bad file must not cost the others, so per-file failures are
+  data (`status` + `code`), not an HTTP error. Only a request-level problem — no files, too many,
+  too large, wrong field name — is a 4xx.
+- **Mixed banks in one request work.** Each file is identified independently.
+- **`importedId`s must be identical to parsing the same file alone.** This is the one thing that
+  can silently corrupt a budget: ids are stamped per *statement*, so a movement appearing in two
+  overlapping exports keeps one id and Actual dedupes it. Stamping across the batch instead would
+  give it two ids and import it twice. Verify by diffing a batch-of-one against `POST /parse`.
+- **One `password` applies to every file.** Statements needing a different one come back as
+  `PDF_PASSWORD_REQUIRED`/`INCORRECT`; retry those individually against `/parse`.
+- Parsing is sequential on purpose — in `PARSER_MODE=ai` each file is a provider call.
+
+`POST /import/confirm` needs no changes to accept a batch: concatenate the reviewed transactions
+from every file into one `transactions` array. Ids already on the rows are preserved.
 
 Real statements live in `Docs/tests/` and are **gitignored** — they're personal statements, so
 they stay out of the repo and out of fixtures.

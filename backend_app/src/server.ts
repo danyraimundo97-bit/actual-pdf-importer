@@ -3,7 +3,8 @@ import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
 import { processStatement, PARSER_MODE } from './index';
-import { ImporterError, NoBudgetSelectedError } from './errors';
+import { FileTooLargeError, ImporterError, NoBudgetSelectedError, TooManyFilesError } from './errors';
+import { parseStatements, summarize } from './statement-batch';
 import { getAiProvider } from './parsers/ai-providers';
 import {
   assignImportedIds,
@@ -23,9 +24,10 @@ app.use(express.json());
 // Memory storage only — the PDF never touches disk, in keeping with the
 // "100% offline / no residual copies" privacy goal. Cap size to something
 // generous for a bank statement (20MB) so a bad upload can't exhaust RAM.
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
+  limits: { fileSize: MAX_FILE_BYTES },
 });
 
 // Server credentials never vary per request, so they're fixed when the
@@ -107,25 +109,57 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // --- Parsing / importing -----------------------------------------------
 
+/** How many statements one POST /parse/batch may carry. */
+const MAX_BATCH_FILES = 20;
+/** Multipart field names, shared with the error handler below. */
+const SINGLE_FILE_FIELD = 'statement';
+const BATCH_FILE_FIELD = 'statements';
+
+function readPassword(body: Record<string, unknown>): string | undefined {
+  return typeof body.password === 'string' && body.password ? body.password : undefined;
+}
+
+/**
+ * Parses one statement and enriches it the way clients expect: a dedupe id
+ * per transaction (so edits on the review screen don't break re-import
+ * dedupe) plus the suggested category from local memory.
+ *
+ * Shared by POST /parse and POST /parse/batch so the two can't drift — and,
+ * more importantly, so `assignImportedIds` runs **once per statement**.
+ * Stamping a whole batch at once would number occurrences relative to the
+ * batch, giving a movement that appears in two overlapping statements two
+ * different ids, which re-imports it as a duplicate.
+ */
+async function parseAndEnrich(buffer: Buffer, password: string | undefined, budgetScope: string) {
+  const { bankId, transactions } = await processStatement(buffer, password);
+  const enriched = assignImportedIds(transactions).map((tx) => {
+    const match = lookupCategory(tx.payee, budgetScope);
+    return {
+      ...tx,
+      suggestedCategoryId: match?.categoryId,
+      suggestedCategoryName: match?.categoryName,
+    };
+  });
+  return { bankId, transactions: enriched };
+}
+
 /**
  * Parses a statement WITHOUT touching Actual. The front end reviews and
- * edits the result, then confirms with POST /import/confirm. Each
- * transaction is enriched with its dedupe id (so edits on the review
- * screen don't break re-import dedupe) and its suggested category from
- * local memory, scoped to the budget in play.
+ * edits the result, then confirms with POST /import/confirm.
  */
-app.post('/parse', upload.single('statement'), async (req: Request, res: Response) => {
+app.post('/parse', upload.single(SINGLE_FILE_FIELD), async (req: Request, res: Response) => {
   if (!req.file) {
     return res
       .status(400)
       .json({ error: 'No file uploaded. Expected multipart field "statement".', code: 'MISSING_FIELD' });
   }
 
-  const password = typeof req.body.password === 'string' && req.body.password ? req.body.password : undefined;
-  const budgetSyncId = resolveBudgetScope(req.body.budgetSyncId);
-
   try {
-    const { bankId, transactions } = await processStatement(req.file.buffer, password);
+    const { bankId, transactions } = await parseAndEnrich(
+      req.file.buffer,
+      readPassword(req.body),
+      resolveBudgetScope(req.body.budgetSyncId),
+    );
 
     if (transactions.length === 0) {
       return res.status(422).json({
@@ -135,19 +169,44 @@ app.post('/parse', upload.single('statement'), async (req: Request, res: Respons
       });
     }
 
-    const enriched = assignImportedIds(transactions).map((tx) => {
-      const match = lookupCategory(tx.payee, budgetSyncId);
-      return {
-        ...tx,
-        suggestedCategoryId: match?.categoryId,
-        suggestedCategoryName: match?.categoryName,
-      };
-    });
-
-    return res.json({ bankId, transactions: enriched });
+    return res.json({ bankId, transactions });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while parsing the statement.');
   }
+});
+
+/**
+ * Same as POST /parse, for several statements in one request — a month of
+ * exports, or one per account. Multipart field: "statements" (repeated).
+ *
+ * Answers 200 for any well-formed request, even when some files failed:
+ * partial success is the normal outcome of a batch, so each file carries its
+ * own `status` and `code` and the client decides what to do per file. A
+ * request-level problem (no files at all, too many, too big) is still a 4xx.
+ *
+ * One `password` applies to every file in the batch. Statements needing
+ * different passwords come back as PDF_PASSWORD_REQUIRED/INCORRECT and can
+ * be retried individually against POST /parse — keyed-by-filename passwords
+ * would be unreliable anyway, since statements get renamed in transit.
+ */
+app.post('/parse/batch', upload.array(BATCH_FILE_FIELD, MAX_BATCH_FILES), async (req: Request, res: Response) => {
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (files.length === 0) {
+    return res.status(400).json({
+      error: 'No files uploaded. Expected one or more multipart fields named "statements".',
+      code: 'MISSING_FIELD',
+    });
+  }
+
+  const password = readPassword(req.body);
+  const budgetScope = resolveBudgetScope(req.body.budgetSyncId);
+
+  // parseStatements never throws for a per-file failure, so there is no
+  // try/catch here: anything escaping it is a genuine bug, and the global
+  // error handler turns that into a 500.
+  const results = await parseStatements(files, (buffer) => parseAndEnrich(buffer, password, budgetScope));
+
+  return res.json({ files: results, ...summarize(results) });
 });
 
 /**
@@ -184,7 +243,7 @@ app.post('/import/confirm', async (req: Request, res: Response) => {
  * shot, no review step. New clients should prefer POST /parse followed by
  * POST /import/confirm.
  */
-app.post('/import', upload.single('statement'), async (req: Request, res: Response) => {
+app.post('/import', upload.single(SINGLE_FILE_FIELD), async (req: Request, res: Response) => {
   if (!req.file) {
     return res
       .status(400)
@@ -315,6 +374,40 @@ app.post('/categories/learn-from-actual', async (req: Request, res: Response) =>
 });
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// --- Error handling ----------------------------------------------------
+//
+// Registered last, so it sees anything the routes threw. Without it a
+// multer rejection (file too big, too many files, wrong field name) escapes
+// as Express's default HTML 500 and breaks the promise that every failure
+// carries a machine-readable `code`.
+/**
+ * multer reports both "more files than allowed" and "file sent under a field
+ * I was not told about" as LIMIT_UNEXPECTED_FILE, distinguishable only by
+ * `field`. Without that check a client using the wrong field name is told
+ * "too many files", which sends them debugging the wrong thing.
+ */
+function mapMulterError(err: multer.MulterError): ImporterError {
+  if (err.code === 'LIMIT_FILE_SIZE') return new FileTooLargeError(MAX_FILE_BYTES);
+  if (err.field === SINGLE_FILE_FIELD || err.field === BATCH_FILE_FIELD) {
+    return new TooManyFilesError(MAX_BATCH_FILES);
+  }
+  return new ImporterError(
+    'MISSING_FIELD',
+    `Unexpected file field "${err.field}". Use "${BATCH_FILE_FIELD}" for POST /parse/batch ` +
+      `or "${SINGLE_FILE_FIELD}" for POST /parse.`,
+    400,
+  );
+}
+
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+
+  if (err instanceof multer.MulterError) {
+    return sendImporterError(res, mapMulterError(err), 'Upload rejected.');
+  }
+  return sendImporterError(res, err, 'Internal server error.');
+});
 
 const PORT = process.env.PORT ?? 3000;
 const server = app.listen(PORT, () => {

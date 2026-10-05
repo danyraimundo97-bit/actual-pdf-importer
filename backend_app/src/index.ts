@@ -1,6 +1,11 @@
 import pdfParse from 'pdf-parse';
 import { BankParser, RawTransaction } from './types';
-import { UnrecognizedBankError, PdfPasswordRequiredError, PdfPasswordIncorrectError } from './errors';
+import {
+  UnrecognizedBankError,
+  PdfPasswordRequiredError,
+  PdfPasswordIncorrectError,
+  PdfUnreadableError,
+} from './errors';
 import { activoBankParser } from './parsers/activobank';
 import { moeyParser } from './parsers/moey';
 import { tradeRepublicParser } from './parsers/traderepublic';
@@ -112,6 +117,8 @@ async function extractText(pdfBuffer: Buffer, password?: string): Promise<string
     const code = (err as { code?: number }).code;
     if (code === 1) throw new PdfPasswordRequiredError();
     if (code === 2) throw new PdfPasswordIncorrectError();
+    // pdf.js signals "this isn't a PDF" by exception name, not a code.
+    if ((err as Error).name === 'InvalidPDFException') throw new PdfUnreadableError();
     throw err;
   }
 }
