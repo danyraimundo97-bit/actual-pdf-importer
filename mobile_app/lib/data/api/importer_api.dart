@@ -7,6 +7,7 @@ import '../models/actual_account.dart';
 import '../models/actual_budget.dart';
 import '../models/actual_category.dart';
 import '../models/backend_config.dart';
+import '../models/dashboard.dart';
 import '../models/import_result.dart';
 import '../models/parse_result.dart';
 import '../models/parsed_transaction.dart';
@@ -65,6 +66,18 @@ class ImporterApi {
     );
     final list = (res.data['groups'] as List).cast<Map<String, dynamic>>();
     return list.map(ActualCategoryGroup.fromJson).toList();
+  }
+
+  /// GET /dashboard: aggregated metrics for one budget (see the backend's
+  /// src/dashboard.ts for what each number includes).
+  Future<Dashboard> getDashboard({String? budgetSyncId, int months = 6}) async {
+    final res = await _guarded(
+      () => _dio.get(
+        '/dashboard',
+        queryParameters: {'months': months, if (budgetSyncId != null) 'budgetSyncId': budgetSyncId},
+      ),
+    );
+    return Dashboard.fromJson(res.data as Map<String, dynamic>);
   }
 
   /// POST /parse. Long timeout override: in PARSER_MODE=ai/both a large

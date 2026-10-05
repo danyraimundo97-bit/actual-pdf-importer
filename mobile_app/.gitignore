@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local dev preset for the debug-only dev page (see dev.example.json).
+dev.json

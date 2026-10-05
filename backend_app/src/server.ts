@@ -14,6 +14,7 @@ import {
   listCategoryGroups,
 } from './actual';
 import { actualSdkAdapter } from './actual-adapter';
+import { getDashboard } from './dashboard';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import { deleteCategoryMapping, listCategoryMappings, lookupCategory, rememberCategory } from './categorydb';
 
@@ -252,6 +253,19 @@ app.get('/budgets', async (_req: Request, res: Response) => {
     res.json({ budgets });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while listing Actual budgets.');
+  }
+});
+
+// Read-only metrics for the app's dashboard (see src/dashboard.ts).
+// `months` is clamped to 1..24 so a typo can't ask for a decade of buckets.
+app.get('/dashboard', async (req: Request, res: Response) => {
+  const requested = Number.parseInt(String(req.query.months ?? '6'), 10);
+  const months = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 24) : 6;
+  try {
+    const dashboard = await getDashboard(budgetSession, resolveBudgetRef(req.query.budgetSyncId), { months });
+    res.json(dashboard);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while building the dashboard.');
   }
 });
 

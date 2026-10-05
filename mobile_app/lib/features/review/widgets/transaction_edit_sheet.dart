@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/format/dates.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../data/models/actual_category.dart';
 import '../../../data/models/parsed_transaction.dart';
 import '../../../shared/widgets/category_picker_sheet.dart';
+import '../../../shared/widgets/labeled_field.dart';
+import '../../../shared/widgets/sheet_body.dart';
 
 /// Edits date/payee/amount/category for one transaction, with the original
 /// `rawLine` shown underneath so an edit can be checked against what the
@@ -12,11 +15,7 @@ class TransactionEditSheet extends StatefulWidget {
   final ParsedTransaction transaction;
   final List<ActualCategoryGroup> categoryGroups;
 
-  const TransactionEditSheet({
-    super.key,
-    required this.transaction,
-    required this.categoryGroups,
-  });
+  const TransactionEditSheet({super.key, required this.transaction, required this.categoryGroups});
 
   @override
   State<TransactionEditSheet> createState() => _TransactionEditSheetState();
@@ -71,13 +70,15 @@ class _TransactionEditSheetState extends State<TransactionEditSheet> {
   void _save() {
     final amountValue = double.tryParse(_amountController.text.trim().replaceAll(',', '.'));
     if (amountValue == null) {
-      setState(() => _amountError = 'Enter a valid amount, e.g. -42.37');
+      setState(() => _amountError = 'Enter an amount like -42.37');
       return;
     }
     final newAmountCents = (amountValue * 100).round();
     final t = widget.transaction;
     final somethingChanged =
-        t.payee != _payeeController.text.trim() || t.amountCents != newAmountCents || t.date != _date;
+        t.payee != _payeeController.text.trim() ||
+        t.amountCents != newAmountCents ||
+        t.date != _date;
 
     Navigator.pop(
       context,
@@ -94,68 +95,79 @@ class _TransactionEditSheetState extends State<TransactionEditSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final colors = context.colors;
+    return SheetBody(
+      title: 'Edit transaction',
+      actions: [
+        OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
+      children: [
+        LabeledField(
+          label: 'Payee',
+          child: TextField(
+            controller: _payeeController,
+            textCapitalization: TextCapitalization.words,
+          ),
+        ),
+        const SizedBox(height: Space.lg),
+        Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Edit transaction', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _payeeController,
-              decoration: const InputDecoration(labelText: 'Payee'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _amountController,
-              decoration: InputDecoration(
-                labelText: 'Amount (negative = outflow)',
-                errorText: _amountError,
+            Expanded(
+              child: LabeledField(
+                label: 'Amount',
+                helper: _amountError == null ? 'Negative for money out' : null,
+                child: TextField(
+                  controller: _amountController,
+                  style: figures(context.text.bodyLarge),
+                  decoration: InputDecoration(errorText: _amountError, errorMaxLines: 2),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                ),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             ),
-            const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(formatDisplayDate(_date)),
-              trailing: const Icon(Icons.calendar_today_outlined),
-              onTap: _pickDate,
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(_categoryName ?? 'Uncategorized'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _pickCategory,
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: LabeledField(
+                label: 'Date',
+                child: PickerField(
+                  value: formatDisplayDate(_date),
+                  useFigures: true,
+                  trailingIcon: Icons.calendar_today_outlined,
+                  onTap: _pickDate,
+                ),
               ),
-              child: Text(widget.transaction.rawLine, style: Theme.of(context).textTheme.bodySmall),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                const SizedBox(width: 8),
-                FilledButton(onPressed: _save, child: const Text('Save')),
-              ],
             ),
           ],
         ),
-      ),
+        const SizedBox(height: Space.lg),
+        LabeledField(
+          label: 'Category',
+          child: PickerField(
+            leadingIcon: Icons.sell_outlined,
+            value: _categoryName ?? 'Uncategorized',
+            isPlaceholder: _categoryName == null,
+            trailingIcon: Icons.chevron_right_rounded,
+            onTap: _pickCategory,
+          ),
+        ),
+        const SizedBox(height: Space.lg),
+        LabeledField(
+          label: 'On the statement',
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(Space.md),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainer,
+              borderRadius: Radii.controlAll,
+            ),
+            child: SelectableText(
+              widget.transaction.rawLine,
+              style: figures(context.text.bodySmall).copyWith(color: colors.onSurfaceVariant),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

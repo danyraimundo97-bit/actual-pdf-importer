@@ -1,0 +1,6 @@
+{
+  "DEV_BACKEND_URL": "http://192.168.1.10:3000",
+  "DEV_TOKEN": "your-IMPORT_TOKEN",
+  "DEV_BUDGET_SYNC_ID": "your-budget-sync-id",
+  "DEV_BUDGET_NAME": "My Budget"
+}
