@@ -1,4 +1,5 @@
 import { BankParser, RawTransaction, parsePtAmountToCents, normalizePtDate } from '../types';
+import { scanMovementBlocks } from './statement-scanner';
 
 // Longer prefixes first: only the first matching prefix is stripped.
 const NOISE_PREFIXES = [
@@ -34,9 +35,9 @@ const NOISE_PREFIXES = [
 const DATE_LINE_RE = /^(\d{2}-\d{2}-\d{4})\s+\/\s+\d{2}-\d{2}-\d{4}(.*)$/;
 const AMOUNT = String.raw`\d{1,3}(?:\.\d{3})*,\d{2}`;
 const BLOCK_RE = new RegExp(`^(.*?)\\s+(${AMOUNT})\\s+([+-])(-?${AMOUNT})$`);
-const HEADER_START_RE = /^[A-Z]{3,}\d{2,}\w*$/; // page code line
-const HEADER_END_RE = /^ACCOUNT DATE\s*\/\s*VALUE DATE/;
-const SECTION_END_RE = /^SALDO FINAL/m;
+// Page code line, then the repeated column header that ends the page break.
+const HEADER_REGION = [/^[A-Z]{3,}\d{2,}\w*$/, /^ACCOUNT DATE\s*\/\s*VALUE DATE/] as const;
+const SECTION_END_RE = /^SALDO FINAL/;
 
 function cleanPayee(rawPayee: string): string {
   // The trailing "9898237/51" card-operation reference differs on every
@@ -62,24 +63,24 @@ export const moeyParser: BankParser = {
   parse(fullText: string): RawTransaction[] {
     const transactions: RawTransaction[] = [];
 
-    const sectionEnd = fullText.search(SECTION_END_RE);
-    const lines: string[] = (sectionEnd === -1 ? fullText : fullText.slice(0, sectionEnd)).split('\n');
+    const blocks = scanMovementBlocks(fullText, {
+      dateLine: DATE_LINE_RE,
+      endAt: SECTION_END_RE,
+      skipRegion: HEADER_REGION,
+    });
 
-    let current: { date: string; parts: string[] } | null = null;
-    let inHeader = false;
-
-    const flush = () => {
-      if (!current) return;
-      const movementDate = current.date;
-      const block = current.parts.join(' ').replace(/\s+/g, ' ').trim();
+    for (const { date, lines } of blocks) {
+      const movementDate = date[1];
+      // date[2] is the rest of the date line: the description starts there,
+      // glued to the value date, and continues on the lines that follow.
+      const block = [date[2], ...lines].join(' ').replace(/\s+/g, ' ').trim();
       const match = block.match(BLOCK_RE);
-      current = null;
 
       if (!match) {
         // Not a movement: a stray line, or a block whose amount/balance got
         // lost. Never silent — a dropped movement must be visible in the log.
         console.warn(`[moey] skipping block with no amount/balance: "${block}"`);
-        return;
+        continue;
       }
 
       const [, description, amountRaw, sign] = match;
@@ -96,37 +97,7 @@ export const moeyParser: BankParser = {
         // the shape — skip this movement rather than failing the import.
         console.warn(`[moey] skipping unparseable block: "${block}" (${(err as Error).message})`);
       }
-    };
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-
-      if (inHeader) {
-        if (HEADER_END_RE.test(line)) {
-          inHeader = false;
-          continue;
-        }
-        // HEADER_START_RE is a heuristic and a wrapped description can trip
-        // it ("IFTHEN25" looks exactly like a page code). A date line is
-        // unambiguous proof we are not in a header, so let it win: a false
-        // positive then costs one block, never the rest of the statement.
-        if (!DATE_LINE_RE.test(line)) continue;
-        inHeader = false;
-      }
-      if (HEADER_START_RE.test(line)) {
-        inHeader = true;
-        continue;
-      }
-
-      const dateMatch = line.match(DATE_LINE_RE);
-      if (dateMatch) {
-        flush();
-        current = { date: dateMatch[1], parts: [dateMatch[2]] };
-      } else if (current && line) {
-        current.parts.push(line);
-      }
     }
-    flush();
 
     return transactions;
   },
