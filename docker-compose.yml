@@ -1,0 +1,67 @@
+services:
+  importer:
+    build:
+      context: ./backend_app
+    image: actual-pdf-importer:local
+    container_name: actual-pdf-importer
+    restart: unless-stopped
+    # tini as PID 1: reaps zombies and forwards SIGTERM to node, which the
+    # server handles by closing the Actual connection cleanly.
+    init: true
+
+    environment:
+      PORT: 3000
+      # Paths inside the container are not the paths on your host. These are
+      # set here rather than in .env, and dotenv does not override a variable
+      # that is already in the environment, so these win.
+      #
+      # Actual's downloaded-budget cache — persisted so a restart doesn't
+      # re-download every budget.
+      ACTUAL_DATA_DIR: /data/actual-cache
+      # The payee -> category memory. THIS IS USER DATA: losing the volume
+      # means re-teaching every category mapping.
+      CATEGORY_DB_PATH: /data/categories.db
+
+    volumes:
+      - importer-data:/data
+      # Secrets are mounted, NOT passed with `env_file:`, on purpose.
+      # Compose interpolates `${VAR}` and `$VAR` inside an env_file, so a
+      # password containing a `$` is silently truncated — an ACTUAL_PASSWORD
+      # of "f2Tt$Sc7yo38gP" reaches the app as "f2Tt" and Actual rejects it
+      # with a confusing auth error. The server already calls dotenv itself,
+      # so letting it read the file directly keeps the value byte-exact.
+      - ./backend_app/.env:/app/.env:ro
+      # If your Actual server uses a self-signed certificate, put its CA
+      # here and set NODE_EXTRA_CA_CERTS=/certs/ca.pem in .env.
+      # - ./certs:/certs:ro
+
+    ports:
+      # Host:container. Change the host side if 3000 is taken.
+      - "3000:3000"
+
+    # shutdown() waits for in-flight Actual work so an import is never cut in
+    # half. Docker's default 10s can be too short for a slow budget sync.
+    stop_grace_period: 30s
+
+    healthcheck:
+      # GET /health is the one route that needs no auth token.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    logging:
+      # Statement contents are never logged, but parser warnings are — cap
+      # the log so a run of bad statements can't fill the disk.
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  importer-data:
