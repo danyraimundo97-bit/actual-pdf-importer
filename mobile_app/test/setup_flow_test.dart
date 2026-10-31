@@ -12,10 +12,10 @@ import 'package:mobile_app/data/providers.dart';
 import 'package:mobile_app/features/setup/screens/setup_screen.dart';
 
 class _FakeImporterApi implements ImporterApi {
-  bool healthy = true;
+  HealthStatus status = HealthStatus.ok;
 
   @override
-  Future<bool> health() async => healthy;
+  Future<HealthStatus> health() async => status;
 
   @override
   Future<BackendConfig> getConfig() async =>
@@ -103,7 +103,7 @@ void main() {
     tester,
   ) async {
     await pumpSetup(tester);
-    api.healthy = false;
+    api.status = HealthStatus.unreachable;
 
     await tester.enterText(find.byType(TextField).first, 'http://10.0.0.9:3000');
     await tester.tap(find.text('Connect'));
@@ -111,5 +111,17 @@ void main() {
 
     expect(find.text('Connect to your importer'), findsOneWidget);
     expect(find.textContaining('Could not reach the importer'), findsOneWidget);
+  });
+
+  testWidgets('a URL that answers but is not the importer (e.g. Actual) says so', (tester) async {
+    await pumpSetup(tester);
+    api.status = HealthStatus.notImporter;
+
+    await tester.enterText(find.byType(TextField).first, 'http://10.0.0.9:5006');
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connect to your importer'), findsOneWidget);
+    expect(find.textContaining('it is not the importer backend'), findsOneWidget);
   });
 }

@@ -396,19 +396,12 @@ class _BudgetStep extends ConsumerWidget {
         if (check.budgetsError != null) ...[
           InlineNote(message: check.budgetsError!, tone: NoteTone.error),
           const SizedBox(height: Space.sm),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => ref.read(connectionControllerProvider.notifier).loadBudgets(),
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Try again'),
-            ),
-          ),
-        ] else if (!check.loadingBudgets && check.budgets.isEmpty)
-          const InlineNote(
-            message: 'The Actual server has no budgets yet. Create one in Actual first.',
-          )
-        else
+          _ReloadBudgetsButton(label: 'Try again'),
+        ] else if (!check.loadingBudgets && check.budgets.isEmpty) ...[
+          const InlineNote(message: noBudgetsMessage),
+          const SizedBox(height: Space.sm),
+          _ReloadBudgetsButton(label: 'Refresh'),
+        ] else
           BudgetList(
             budgets: check.budgets,
             loading: check.loadingBudgets,
@@ -416,6 +409,26 @@ class _BudgetStep extends ConsumerWidget {
             onSelect: (b) => _select(context, ref, b),
           ),
       ],
+    );
+  }
+}
+
+/// Re-fetches the budget list — after a failure, or after creating the first
+/// budget in Actual while this step is open.
+class _ReloadBudgetsButton extends ConsumerWidget {
+  final String label;
+
+  const _ReloadBudgetsButton({required this.label});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: () => ref.read(connectionControllerProvider.notifier).loadBudgets(),
+        icon: const Icon(Icons.refresh_rounded, size: 18),
+        label: Text(label),
+      ),
     );
   }
 }

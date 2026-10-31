@@ -115,7 +115,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             InlineNote(message: check.budgetsError!, tone: NoteTone.error)
           else if (!check.loadingBudgets && check.budgets.isEmpty)
             InlineNote(
-              message: config.budgetName == null
+              // Connected with an empty list means the server really has none;
+              // otherwise the list just hasn't been loaded yet.
+              message: check.isConnected
+                  ? noBudgetsMessage
+                  : config.budgetName == null
                   ? 'Save and test the connection to load your budgets.'
                   : 'Using "${config.budgetName}". Save and test the connection to switch budgets.',
             )

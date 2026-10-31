@@ -13,9 +13,6 @@ import '../models/parse_result.dart';
 import '../models/parsed_transaction.dart';
 import 'api_client.dart';
 
-/// Wraps the importer backend's endpoints. Every screen calls through
-/// here, never `dio` directly — see the plan's "widgets never touch dio
-/// directly" rule.
 /// What GET /health says about the configured backend URL.
 enum HealthStatus { ok, unreachable, notImporter }
 
@@ -25,6 +22,9 @@ const notImporterMessage = 'Something answered at this address, but it is not th
     "If it is your Actual server (port 5006), use the importer backend's address instead "
     '(port 3000 by default).';
 
+/// Wraps the importer backend's endpoints. Every screen calls through
+/// here, never `dio` directly — see the plan's "widgets never touch dio
+/// directly" rule.
 class ImporterApi {
   final ApiClient _client;
 

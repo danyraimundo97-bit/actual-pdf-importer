@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../data/api/api_client.dart';
+import '../../data/api/importer_api.dart';
 import '../../data/models/actual_budget.dart';
 import '../../data/models/backend_config.dart';
 import '../../data/providers.dart';
 import '../../shared/widgets/labeled_field.dart';
 
 enum ConnectionStatus { idle, testing, connected, failed }
+
+/// Shown when the importer and Actual are both reachable but Actual has no
+/// budget to import into — common on a freshly set-up Actual server.
+const noBudgetsMessage =
+    "Your Actual server doesn't have any budgets yet. Open Actual in your browser, "
+    'create a budget (or import one), then tap Refresh.';
 
 /// Connection + budget selection state shared by Settings and the setup
 /// guide, so both run the exact same checks.
@@ -58,15 +66,22 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
   /// Saves the address and token, then checks /health and /config. Returns
   /// whether the importer is reachable and accepted the token.
   Future<bool> saveAndTest({required String url, required String token}) async {
-    final trimmed = url.trim();
-    if (trimmed.isEmpty) {
+    if (url.trim().isEmpty) {
       state = state.copyWith(
         status: ConnectionStatus.failed,
         message: 'Enter the address of your importer backend first.',
       );
       return false;
     }
-    await ref.read(appConfigProvider.notifier).setBackendUrl(trimmed);
+    final normalized = normalizeBackendUrl(url);
+    if (normalized == null) {
+      state = state.copyWith(
+        status: ConnectionStatus.failed,
+        message: 'That is not a valid address. Use something like http://192.168.1.10:3000.',
+      );
+      return false;
+    }
+    await ref.read(appConfigProvider.notifier).setBackendUrl(normalized);
     await ref.read(secretStoreProvider).setApiToken(token.trim());
     return test();
   }
@@ -75,12 +90,14 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
     state = state.copyWith(status: ConnectionStatus.testing, clearMessage: true);
     final api = ref.read(importerApiProvider);
     try {
-      if (!await api.health()) {
+      final health = await api.health();
+      if (health != HealthStatus.ok) {
         state = state.copyWith(
           status: ConnectionStatus.failed,
-          message:
-              'Could not reach the importer at this address. Check that backend_app '
-              'is running and the phone is on the same network.',
+          message: health == HealthStatus.notImporter
+              ? notImporterMessage
+              : 'Could not reach the importer at this address. Check that backend_app '
+                    'is running and the phone is on the same network.',
         );
         return false;
       }
