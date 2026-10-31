@@ -1,0 +1,25 @@
+# Rebuilt inside the image.
+node_modules
+dist
+
+# Secrets: the image must never bake these in. The container reads .env at
+# run time via docker-compose's env_file instead.
+.env
+.env.dev
+
+# Real bank statements and their extractions live here — personal data that
+# must not end up in an image layer.
+Docs/tests
+
+# Runtime state belongs in the /data volume, not the image.
+data
+actual-cache
+*.db
+*.db-shm
+*.db-wal
+
+# Not needed to run the server.
+Docs
+README.md
+Dockerfile
+.dockerignore

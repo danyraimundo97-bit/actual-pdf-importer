@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
-import multer from 'multer';
 import { processStatement, PARSER_MODE } from './index';
 import { ImporterError, NoBudgetSelectedError } from './errors';
+import { receiveFiles } from './upload';
+import { parseStatements, summarize } from './statement-batch';
 import { getAiProvider } from './parsers/ai-providers';
 import {
   assignImportedIds,
@@ -20,14 +21,6 @@ import { deleteCategoryMapping, listCategoryMappings, lookupCategory, rememberCa
 
 const app = express();
 app.use(express.json());
-
-// Memory storage only — the PDF never touches disk, in keeping with the
-// "100% offline / no residual copies" privacy goal. Cap size to something
-// generous for a bank statement (20MB) so a bad upload can't exhaust RAM.
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 },
-});
 
 // Server credentials never vary per request, so they're fixed when the
 // budget session is created; only the budget choice is per-request.
@@ -108,25 +101,93 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // --- Parsing / importing -----------------------------------------------
 
+/** How many statements one POST /parse may carry. */
+const MAX_PARSE_FILES = 20;
+
+// Upload handling lives in upload.ts: memory storage only (the PDF never
+// touches disk, per the "no residual copies" privacy goal), per-file and
+// per-request size caps, and a log line whenever an upload is rejected.
+//
+// POST /parse takes either field name, so one-file clients sending
+// "statement" and multi-file clients sending "statements" both just work.
+const receiveStatements = receiveFiles({ fields: ['statement', 'statements'], maxFiles: MAX_PARSE_FILES });
+const receiveStatement = receiveFiles({
+  fields: ['statement'],
+  maxFiles: 1,
+  tooManyHint: 'Use POST /parse to parse several statements, then POST /import/confirm.',
+});
+
+function readPassword(body: Record<string, unknown>): string | undefined {
+  return typeof body.password === 'string' && body.password ? body.password : undefined;
+}
+
 /**
- * Parses a statement WITHOUT touching Actual. The front end reviews and
- * edits the result, then confirms with POST /import/confirm. Each
- * transaction is enriched with its dedupe id (so edits on the review
- * screen don't break re-import dedupe) and its suggested category from
- * local memory, scoped to the budget in play.
+ * Parses one statement and enriches it the way clients expect: a dedupe id
+ * per transaction (so edits on the review screen don't break re-import
+ * dedupe) plus the suggested category from local memory.
+ *
+ * Used for every file POST /parse receives, one or many, so
+ * `assignImportedIds` runs **once per statement**.
+ * Stamping a whole batch at once would number occurrences relative to the
+ * batch, giving a movement that appears in two overlapping statements two
+ * different ids, which re-imports it as a duplicate.
  */
-app.post('/parse', upload.single('statement'), async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res
-      .status(400)
-      .json({ error: 'No file uploaded. Expected multipart field "statement".', code: 'MISSING_FIELD' });
+async function parseAndEnrich(buffer: Buffer, password: string | undefined, budgetScope: string) {
+  const { bankId, transactions } = await processStatement(buffer, password);
+  const enriched = assignImportedIds(transactions).map((tx) => {
+    const match = lookupCategory(tx.payee, budgetScope);
+    return {
+      ...tx,
+      suggestedCategoryId: match?.categoryId,
+      suggestedCategoryName: match?.categoryName,
+    };
+  });
+  return { bankId, transactions: enriched };
+}
+
+/**
+ * Parses one or more statements WITHOUT touching Actual. The front end
+ * reviews and edits the result, then confirms with POST /import/confirm.
+ * Multipart field: "statement" or "statements", repeated for several files.
+ *
+ * The number of files received picks the response shape:
+ *
+ * - **One file** → `{ bankId, transactions }`, and a failure is an HTTP error
+ *   with its `code` (e.g. 422 NO_TRANSACTIONS) — the shape single-statement
+ *   clients like the mobile app rely on.
+ * - **Several files** → `{ files: [...], parsed, failed, transactions }` with
+ *   200 even when some failed: partial success is the normal outcome of a
+ *   batch, so each file carries its own `status` and `code` and the client
+ *   decides per file. A request-level problem (no files, too many, too big)
+ *   is still a 4xx.
+ *
+ * One `password` applies to every file. Statements needing a different one
+ * come back as PDF_PASSWORD_REQUIRED/INCORRECT and can be re-sent alone —
+ * keyed-by-filename passwords would be unreliable anyway, since statements
+ * get renamed in transit.
+ */
+app.post('/parse', receiveStatements, async (req: Request, res: Response) => {
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (files.length === 0) {
+    return res.status(400).json({
+      error: 'No file uploaded. Expected one or more multipart fields named "statement" or "statements".',
+      code: 'MISSING_FIELD',
+    });
   }
 
-  const password = typeof req.body.password === 'string' && req.body.password ? req.body.password : undefined;
-  const budgetSyncId = resolveBudgetScope(req.body.budgetSyncId);
+  const password = readPassword(req.body);
+  const budgetScope = resolveBudgetScope(req.body.budgetSyncId);
+
+  if (files.length > 1) {
+    // parseStatements never throws for a per-file failure, so there is no
+    // try/catch here: anything escaping it is a genuine bug, and the global
+    // error handler turns that into a 500.
+    const results = await parseStatements(files, (buffer) => parseAndEnrich(buffer, password, budgetScope));
+    return res.json({ files: results, ...summarize(results) });
+  }
 
   try {
-    const { bankId, transactions } = await processStatement(req.file.buffer, password);
+    const { bankId, transactions } = await parseAndEnrich(files[0].buffer, password, budgetScope);
 
     if (transactions.length === 0) {
       return res.status(422).json({
@@ -136,16 +197,7 @@ app.post('/parse', upload.single('statement'), async (req: Request, res: Respons
       });
     }
 
-    const enriched = assignImportedIds(transactions).map((tx) => {
-      const match = lookupCategory(tx.payee, budgetSyncId);
-      return {
-        ...tx,
-        suggestedCategoryId: match?.categoryId,
-        suggestedCategoryName: match?.categoryName,
-      };
-    });
-
-    return res.json({ bankId, transactions: enriched });
+    return res.json({ bankId, transactions });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while parsing the statement.');
   }
@@ -185,7 +237,7 @@ app.post('/import/confirm', async (req: Request, res: Response) => {
  * shot, no review step. New clients should prefer POST /parse followed by
  * POST /import/confirm.
  */
-app.post('/import', upload.single('statement'), async (req: Request, res: Response) => {
+app.post('/import', receiveStatement, async (req: Request, res: Response) => {
   if (!req.file) {
     return res
       .status(400)
@@ -329,6 +381,17 @@ app.post('/categories/learn-from-actual', async (req: Request, res: Response) =>
 });
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// --- Error handling ----------------------------------------------------
+//
+// Registered last, so it sees anything the routes threw — including the
+// typed upload rejections from upload.ts. Without it those would escape as
+// Express's default HTML 500 and break the promise that every failure
+// carries a machine-readable `code`.
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) return next(err);
+  return sendImporterError(res, err, 'Internal server error.');
+});
 
 const PORT = process.env.PORT ?? 3000;
 const server = app.listen(PORT, () => {
