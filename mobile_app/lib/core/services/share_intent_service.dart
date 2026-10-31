@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 /// Wraps receive_sharing_intent's static API so a PDF shared from a bank
@@ -22,9 +24,15 @@ class SharedPdf {
 class ShareIntentService {
   StreamSubscription<List<SharedMediaFile>>? _subscription;
 
+  /// The plugin only has Android and iOS implementations; anywhere else
+  /// (desktop, web) every call throws MissingPluginException. `kIsWeb` is
+  /// checked first because `Platform` itself throws on web.
+  static bool get isSupported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
   /// Call once at screen startup: picks up a PDF that launched the app via
   /// the share sheet (cold start), then clears it so it isn't redelivered.
   Future<SharedPdf?> takeInitial() async {
+    if (!isSupported) return null;
     final media = await ReceiveSharingIntent.instance.getInitialMedia();
     final pdf = _firstPdf(media);
     if (pdf != null) {
@@ -36,6 +44,7 @@ class ShareIntentService {
   /// Call once at screen startup: handles a PDF shared while the app is
   /// already running.
   void listen(void Function(SharedPdf pdf) onShared) {
+    if (!isSupported) return;
     _subscription = ReceiveSharingIntent.instance.getMediaStream().listen((media) {
       final pdf = _firstPdf(media);
       if (pdf != null) onShared(pdf);

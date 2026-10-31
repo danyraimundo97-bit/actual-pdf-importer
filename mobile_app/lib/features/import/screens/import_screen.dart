@@ -146,6 +146,8 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
         );
     ref.invalidate(dashboardProvider);
+    // The import remembered each payee's category on the backend.
+    ref.read(categoryMemoryRevisionProvider.notifier).state++;
   }
 
   @override

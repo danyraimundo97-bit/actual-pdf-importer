@@ -149,6 +149,11 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // This tab stays alive in the shell, so initState runs once per app
+    // session: reload when an import saved new mappings or the budget changed,
+    // or the list keeps showing what it loaded at startup.
+    ref.listen(categoryMemoryRevisionProvider, (_, _) => _load());
+    ref.listen(appConfigProvider.select((c) => c.budgetSyncId), (_, _) => _load());
     final query = _query.trim().toLowerCase();
     final filtered = query.isEmpty
         ? _mappings

@@ -124,6 +124,11 @@ final backendConfigProvider = FutureProvider.autoDispose<BackendConfig>((ref) {
   return ref.watch(importerApiProvider).getConfig();
 });
 
+/// Bumped whenever the backend's payee→category memory may have changed
+/// behind the Memory tab's back — an import saves the categories used. The
+/// tab stays alive in the shell, so it listens to this to reload.
+final categoryMemoryRevisionProvider = StateProvider<int>((ref) => 0);
+
 /// GET /dashboard for the active budget. Invalidated after an import so
 /// the numbers reflect what was just added.
 final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) {
