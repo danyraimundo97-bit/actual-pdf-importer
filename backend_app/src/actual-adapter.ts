@@ -1,3 +1,4 @@
+import fs from 'fs';
 import * as actualApi from '@actual-app/api';
 import type { ActualAdapter } from './budget-session';
 
@@ -9,6 +10,9 @@ import type { ActualAdapter } from './budget-session';
  */
 export const actualSdkAdapter: ActualAdapter = {
   async init({ serverURL, password, dataDir }) {
+    // The SDK doesn't create its cache folder: init() succeeds without it,
+    // then getBudgets() fails with ENOENT scanning it for local budgets.
+    fs.mkdirSync(dataDir, { recursive: true });
     await actualApi.init({ serverURL, password, dataDir });
   },
 

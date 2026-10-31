@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/api_exception.dart';
+import '../../../data/api/importer_api.dart';
 import '../../../data/models/actual_budget.dart';
 import '../../../data/providers.dart';
 
@@ -58,11 +59,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     final api = ref.read(importerApiProvider);
     try {
-      final healthy = await api.health();
-      if (!healthy) {
+      final health = await api.health();
+      if (health != HealthStatus.ok) {
         setState(() {
           _statusIsError = true;
-          _statusMessage = 'Could not reach the importer at this address.';
+          _statusMessage = health == HealthStatus.notImporter
+              ? notImporterMessage
+              : 'Could not reach the importer at this address.';
         });
         return;
       }

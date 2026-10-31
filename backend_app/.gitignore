@@ -3,3 +3,5 @@ dist/
 data/
 *.db
 .env
+# Actual SDK working copy (ACTUAL_DATA_DIR): a full copy of the budget.
+actual-cache/

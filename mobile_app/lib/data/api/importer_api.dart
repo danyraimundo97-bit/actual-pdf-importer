@@ -15,6 +15,15 @@ import 'api_client.dart';
 /// Wraps the importer backend's endpoints. Every screen calls through
 /// here, never `dio` directly — see the plan's "widgets never touch dio
 /// directly" rule.
+/// What GET /health says about the configured backend URL.
+enum HealthStatus { ok, unreachable, notImporter }
+
+/// Shown when the URL answers, but not as the importer — most often because
+/// the Actual server's URL was entered instead of the backend's.
+const notImporterMessage = 'Something answered at this address, but it is not the importer backend. '
+    "If it is your Actual server (port 5006), use the importer backend's address instead "
+    '(port 3000 by default).';
+
 class ImporterApi {
   final ApiClient _client;
 
@@ -22,15 +31,20 @@ class ImporterApi {
 
   Dio get _dio => _client.dio;
 
-  /// GET /health. Deliberately swallows errors into `false` rather than
+  /// GET /health. Deliberately swallows errors into a status rather than
   /// throwing — Settings uses this to distinguish "unreachable" from
   /// "reachable but the token was rejected" (which /config would surface).
-  Future<bool> health() async {
+  ///
+  /// Checks the body, not just the 200: a web app such as Actual's own
+  /// server answers every path with its HTML page, so a status-only check
+  /// would call it healthy when the user typed the wrong URL.
+  Future<HealthStatus> health() async {
     try {
       final res = await _dio.get('/health');
-      return res.statusCode == 200;
-    } on DioException {
-      return false;
+      final data = res.data;
+      return data is Map && data['status'] == 'ok' ? HealthStatus.ok : HealthStatus.notImporter;
+    } on DioException catch (e) {
+      return e.response == null ? HealthStatus.unreachable : HealthStatus.notImporter;
     }
   }
 
@@ -115,11 +129,19 @@ class ImporterApi {
     return ImportResult.fromJson(res.data as Map<String, dynamic>);
   }
 
+  /// Maps Dio failures to [ApiException], and rejects a reply that isn't a
+  /// JSON object: every importer route answers with one, so anything else
+  /// (typically an HTML page) means the URL points at some other server.
   Future<Response<dynamic>> _guarded(Future<Response<dynamic>> Function() call) async {
+    final Response<dynamic> res;
     try {
-      return await call();
+      res = await call();
     } on DioException catch (e) {
       throw ApiException.fromDio(e);
     }
+    if (res.data is! Map) {
+      throw ApiException(statusCode: res.statusCode, message: notImporterMessage);
+    }
+    return res;
   }
 }

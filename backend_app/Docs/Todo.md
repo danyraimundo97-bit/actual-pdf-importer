@@ -1,5 +1,28 @@
 ## Melhorias 
 - Meter um config para ser adaptavel a outros bancos.
+- **Suporte CORS no backend.** A app Flutter a correr no Chrome (`flutter run -d chrome`) não
+  consegue falar com o backend: as respostas não trazem `Access-Control-Allow-Origin`, o browser
+  bloqueia-as e a app mostra "Could not reach the importer" (na consola do DevTools aparece
+  "blocked by CORS policy"). Android/desktop não são afetados — CORS só existe no browser.
+  - Permitir o header `X-Import-Token` e deixar passar o pedido `OPTIONS` (preflight) antes do
+    middleware de auth em `src/server.ts`.
+  - Por omissão aceitar só origens `localhost` / `127.0.0.1` (a porta do Flutter web muda a cada
+    execução) e um `CORS_ORIGINS` no `.env` para o resto. Não usar `*`: com `IMPORT_TOKEN` vazio,
+    qualquer site aberto no browser poderia ler o orçamento através do backend.
+- **Logging no backend e na app.** Hoje é difícil diagnosticar problemas: a app não tem logging
+  nenhum (erros tratados, como "Could not reach the importer", só aparecem no ecrã e não ficam
+  registados em lado nenhum) e o backend só regista o arranque, uploads rejeitados e erros.
+  - **Backend:** uma linha por pedido (método, rota, status, duração), para responder a "o pedido
+    chega sequer ao backend?". Nunca registar o `X-Import-Token`, passwords, o conteúdo dos PDFs
+    nem os movimentos (são dados bancários pessoais).
+  - **App — pedidos de rede:** interceptor no Dio que, em debug, regista cada pedido ao backend
+    (método, URL, status, duração e tipo de erro quando falha). O mesmo cuidado: sem token, sem
+    PDF. Isto teria mostrado logo o problema de CORS e o URL sem `http://`.
+  - **App — erros não apanhados:** `FlutterError.onError` + `PlatformDispatcher.instance.onError`
+    para registar qualquer crash com stack trace num só sítio.
+  - **App — ficheiro de log (opcional):** guardar os logs recentes num ficheiro pequeno no
+    dispositivo, com um botão "Copiar logs" nas definições/ecrã dev. É a única forma de ver o que
+    se passa numa build instalada no telemóvel, sem terminal ligado (precisa de `path_provider`).
 
 
 
