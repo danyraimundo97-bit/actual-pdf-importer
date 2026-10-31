@@ -9,7 +9,7 @@ Start the backend first, then point the mobile app at it.
 
 ## Prerequisites
 
-- **Node.js 20+** and npm (backend)
+- **Node.js 22+** and npm (backend; required by `@actual-app/api`)
 - **Flutter SDK 3.44+** with Dart `3.13+` (mobile app) — check with `flutter --version`, update with `flutter upgrade`, plus an Android emulator/device, iOS simulator, or desktop target
 - A running **Actual Budget server** (self-hosted, default `http://localhost:5006`)
 - *Optional:* an Anthropic or Gemini API key if you want the AI parser

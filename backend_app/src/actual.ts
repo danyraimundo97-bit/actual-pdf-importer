@@ -158,19 +158,37 @@ export async function listCategoryGroups(session: BudgetSession, budget: BudgetR
   const groups = await session.withBudget(budget, (actual) => actual.getCategoryGroups());
   return groups
     .filter((g) => !g.hidden)
-    .map((g) => ({ ...g, categories: g.categories.filter((c) => !c.hidden) }));
+    // Annotated by hand: @actual-app/api 26 declares these types in
+    // @actual-app/core via package "exports", which this tsconfig's module
+    // resolution doesn't follow, so they arrive untyped.
+    .map((g) => ({ ...g, categories: g.categories.filter((c: { hidden?: boolean }) => !c.hidden) }));
 }
 
 /**
  * GET /budgets. Only needs the server connection, not any particular
  * budget downloaded — uses withServer so listing budgets doesn't force-
  * download whichever one happens to be default.
+ *
+ * `syncId` is the SDK's `groupId` — the "Sync ID" Actual shows in its
+ * advanced settings, and the only id downloadBudget() looks budgets up by.
+ * `cloudFileId` is the server's internal file id and is NOT interchangeable:
+ * returning it here made every budget picked in the app fail with "Budget …
+ * not found".
+ *
+ * The SDK lists local copies and server files together, so a budget already
+ * downloaded into ACTUAL_DATA_DIR appears twice; one entry per groupId. A
+ * local-only budget (never uploaded) has no groupId and can't be downloaded
+ * by sync id, so it's left out.
  */
 export async function listBudgets(session: BudgetSession) {
   const budgets = await session.withServer((actual) => actual.getBudgets());
-  return budgets.map((b) => ({
-    syncId: b.cloudFileId,
-    name: b.name,
-    encrypted: b.hasKey,
-  }));
+  const bySyncId = new Map<string, { syncId: string; name: string; encrypted: boolean }>();
+  for (const b of budgets) {
+    if (!b.groupId || bySyncId.has(b.groupId)) continue;
+    // encryptKeyId, not hasKey: hasKey only says whether this machine already
+    // holds the key, but downloadBudget() demands the password for any
+    // encrypted file regardless.
+    bySyncId.set(b.groupId, { syncId: b.groupId, name: b.name, encrypted: Boolean(b.encryptKeyId) });
+  }
+  return [...bySyncId.values()];
 }

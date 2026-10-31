@@ -14,7 +14,7 @@ import {
   listBudgets,
   listCategoryGroups,
 } from './actual';
-import { actualSdkAdapter } from './actual-adapter';
+import { actualSdkAdapter, isHandledSdkError } from './actual-adapter';
 import { getDashboard } from './dashboard';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import { deleteCategoryMapping, listCategoryMappings, lookupCategory, rememberCategory } from './categorydb';
@@ -391,6 +391,15 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
   if (res.headersSent) return next(err);
   return sendImporterError(res, err, 'Internal server error.');
+});
+
+// @actual-app/api leaks a duplicate of some errors it also returns to the
+// caller (see actual-adapter.ts). Those were already turned into a JSON
+// error response, so dropping the duplicate is safe. Anything else is still
+// rethrown, keeping Node's default of crashing on a genuine unhandled bug.
+process.on('unhandledRejection', (reason) => {
+  if (isHandledSdkError(reason)) return;
+  throw reason;
 });
 
 const PORT = process.env.PORT ?? 3000;

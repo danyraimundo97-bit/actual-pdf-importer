@@ -14,6 +14,7 @@ export type ErrorCode =
   | 'PDF_UNREADABLE'
   | 'MISSING_FIELD'
   | 'NO_BUDGET_SELECTED'
+  | 'BUDGET_NOT_FOUND'
   | 'UNAUTHORIZED'
   | 'TOO_MANY_FILES'
   | 'FILE_TOO_LARGE'
@@ -76,6 +77,22 @@ export class NoBudgetSelectedError extends ImporterError {
       'NO_BUDGET_SELECTED',
       'No budget selected: pass "budgetSyncId" or set ACTUAL_BUDGET_SYNC_ID in the backend .env.',
       400,
+    );
+  }
+}
+
+/**
+ * The requested sync id isn't a budget on the Actual server — typically a
+ * stale choice saved by the app, or an ACTUAL_BUDGET_SYNC_ID copied from a
+ * different server. The client should send the user back to pick a budget.
+ */
+export class BudgetNotFoundError extends ImporterError {
+  constructor(syncId: string) {
+    super(
+      'BUDGET_NOT_FOUND',
+      `Budget "${syncId}" was not found on the Actual server. Pick the budget again in Settings ` +
+        '(or fix ACTUAL_BUDGET_SYNC_ID in the backend .env).',
+      404,
     );
   }
 }

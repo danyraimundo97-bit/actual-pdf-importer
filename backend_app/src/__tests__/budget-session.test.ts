@@ -43,6 +43,36 @@ test('server init runs once and an already-loaded budget is not re-downloaded', 
   assert.deepEqual(state.downloads, ['A']);
 });
 
+// Regression: an account created in Actual's web app after the backend had
+// downloaded the budget stayed invisible until the backend restarted.
+test('reusing a loaded budget syncs it first; a fresh download needs no sync', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const session = createBudgetSession(SERVER, adapter);
+
+  await session.withBudget({ syncId: 'A' }, async () => {
+    assert.deepEqual(state.syncs, []); // just downloaded: already current
+  });
+  await session.withBudget({ syncId: 'A' }, async () => {
+    assert.deepEqual(state.syncs, ['A']); // synced before fn runs
+  });
+  await session.withServer(async () => {});
+
+  assert.deepEqual(state.syncs, ['A']); // withServer touches no budget
+  assert.deepEqual(state.downloads, ['A']);
+});
+
+test('a failed sync fails the turn and forces a re-download next time', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const session = createBudgetSession(SERVER, adapter);
+
+  await session.withBudget({ syncId: 'A' }, async () => {});
+  state.failNextSync = true;
+  await assert.rejects(session.withBudget({ syncId: 'A' }, async () => {}), /sync failed/);
+  await session.withBudget({ syncId: 'A' }, async () => {});
+
+  assert.deepEqual(state.downloads, ['A', 'A']);
+});
+
 test('withServer does not download any budget', async () => {
   const { adapter, state } = makeFakeAdapter();
   const session = createBudgetSession(SERVER, adapter);

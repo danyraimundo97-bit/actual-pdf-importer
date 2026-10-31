@@ -53,6 +53,8 @@ export type ActualPort = Pick<
 export interface ActualAdapter {
   init(config: ServerConfig): Promise<void>;
   downloadBudget(budget: BudgetRef): Promise<void>;
+  /** Pulls changes made elsewhere (web app, phone) into the loaded budget. */
+  sync(): Promise<void>;
   shutdown(): Promise<void>;
   readonly port: ActualPort;
 }
@@ -94,6 +96,17 @@ export function createBudgetSession(serverConfig: ServerConfig, adapter: ActualA
         loadedSyncId = null;
         await adapter.downloadBudget(budget);
         loadedSyncId = budget.syncId;
+      } else if (budget) {
+        // Already loaded, but possibly from long ago: without this, accounts
+        // or transactions added in Actual since then stay invisible until a
+        // restart, and import dedupe checks against stale data. A failed
+        // sync leaves the copy's state unknown, so re-download next time.
+        try {
+          await adapter.sync();
+        } catch (err) {
+          loadedSyncId = null;
+          throw err;
+        }
       }
       return fn(adapter.port);
     });

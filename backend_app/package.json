@@ -10,7 +10,7 @@
     "test": "node --test \"dist/**/*.test.js\""
   },
   "dependencies": {
-    "@actual-app/api": "^6.8.1",
+    "@actual-app/api": "^26.10.0",
     "@anthropic-ai/sdk": "^0.32.1",
     "@google/generative-ai": "^0.21.0",
     "better-sqlite3": "^12.11.1",
@@ -27,5 +27,8 @@
     "@types/pdf-parse": "^1.1.4",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

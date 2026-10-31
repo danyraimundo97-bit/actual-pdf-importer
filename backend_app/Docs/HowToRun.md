@@ -38,7 +38,7 @@ below explain each step.
 
 | Need | For | Check |
 | --- | --- | --- |
-| Node.js 20+ and npm | backend | `node --version` |
+| Node.js 22+ and npm | backend (required by `@actual-app/api`) | `node --version` |
 | Flutter SDK with Dart 3.13+ | mobile app | `flutter --version` (update with `flutter upgrade`) |
 | An Actual Budget server | importing | open `http://localhost:5006` in a browser |
 | Docker *(optional)* | running Actual and/or the backend in containers | `docker compose version` |

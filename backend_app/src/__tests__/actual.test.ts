@@ -66,7 +66,7 @@ test('listCategoryGroups drops hidden groups and hidden categories', async () =>
   const groups = await listCategoryGroups(session, { syncId: 'budget-A' });
 
   assert.deepEqual(
-    groups.map((g) => [g.id, g.categories.map((c) => c.id)]),
+    groups.map((g) => [g.id, g.categories.map((c: { id: string }) => c.id)]),
     [['g1', ['c1']]],
   );
 });
@@ -82,14 +82,35 @@ test('listAccounts runs with the requested budget loaded', async () => {
   assert.deepEqual(accounts, [{ id: 'acc-1', loaded: 'budget-B' }]);
 });
 
-test('listBudgets maps the SDK shape and downloads no budget', async () => {
+test('listBudgets returns the sync id (groupId), not the file id, and downloads no budget', async () => {
   const { adapter, state } = makeFakeAdapter({
-    getBudgets: (async () => [{ cloudFileId: 'sync-1', name: 'Home', hasKey: true }]),
+    getBudgets: (async () => [
+      // Shaped like a real server's answer: the two ids differ, and only
+      // groupId is accepted by downloadBudget().
+      { cloudFileId: 'file-1', groupId: 'sync-1', name: 'Home', hasKey: false, encryptKeyId: 'key-1' },
+      { cloudFileId: 'file-2', groupId: 'sync-2', name: 'Work', hasKey: true },
+    ]),
   });
   const session = createBudgetSession(SERVER, adapter);
 
-  assert.deepEqual(await listBudgets(session), [{ syncId: 'sync-1', name: 'Home', encrypted: true }]);
+  assert.deepEqual(await listBudgets(session), [
+    { syncId: 'sync-1', name: 'Home', encrypted: true },
+    { syncId: 'sync-2', name: 'Work', encrypted: false },
+  ]);
   assert.deepEqual(state.downloads, []);
+});
+
+test('listBudgets lists a downloaded budget once and skips local-only ones', async () => {
+  const { adapter } = makeFakeAdapter({
+    getBudgets: (async () => [
+      { id: 'local-1', cloudFileId: 'file-1', groupId: 'sync-1', name: 'Home' }, // local copy
+      { cloudFileId: 'file-1', groupId: 'sync-1', name: 'Home', hasKey: false, state: 'remote' },
+      { id: 'local-2', name: 'Never uploaded' }, // no groupId: can't be downloaded by sync id
+    ]),
+  });
+  const session = createBudgetSession(SERVER, adapter);
+
+  assert.deepEqual(await listBudgets(session), [{ syncId: 'sync-1', name: 'Home', encrypted: false }]);
 });
 
 // A real moey! statement had three identical "+10,00 from <truncated payee>"

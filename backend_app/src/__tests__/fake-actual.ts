@@ -27,6 +27,8 @@ export function makeFakeAdapter(port: FakePort = {}) {
     shutdowns: 0,
     loaded: null as string | null,
     failNextDownload: false,
+    syncs: [] as string[],
+    failNextSync: false,
   };
 
   const adapter: ActualAdapter = {
@@ -41,6 +43,14 @@ export function makeFakeAdapter(port: FakePort = {}) {
         throw new Error('download failed');
       }
       state.loaded = syncId;
+    },
+    async sync() {
+      await tick();
+      state.syncs.push(state.loaded ?? '(none)');
+      if (state.failNextSync) {
+        state.failNextSync = false;
+        throw new Error('sync failed');
+      }
     },
     async shutdown() {
       state.shutdowns++;
