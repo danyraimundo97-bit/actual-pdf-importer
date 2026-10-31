@@ -30,7 +30,7 @@ file.
 
 ### What's covered today
 
-45 tests across nine files:
+51 tests across ten files:
 
 | File | Covers |
 | --- | --- |
@@ -42,6 +42,7 @@ file.
 | `categorydb.test.ts` | Per-budget scoping with the unscoped fallback |
 | `categorydb-migration.test.ts` | Migrating a pre-scoping table into the unscoped bucket |
 | `moey.test.ts` | `canParse` accept/reject, date + cleaned payee + signed amount, the savings-section cutoff, and a page-code regression |
+| `upload.test.ts` | Upload limits over real HTTP: exact file count in `TOO_MANY_FILES`, `FILE_TOO_LARGE` vs `BATCH_TOO_LARGE`, wrong field name, the rejection log line |
 | `pdf-password.test.ts` | pdf.js password errors → `PdfPasswordRequiredError` / `PdfPasswordIncorrectError` |
 
 Both Actual-facing suites drive a fake `ActualAdapter` (`src/__tests__/fake-actual.ts`), so
@@ -63,8 +64,8 @@ Judge the run by the trailing `pass`/`fail` counts.
 
 ### Known gaps
 
-- **No HTTP-level tests.** Route wiring, auth, and the multer→`code` mapping are only covered by
-  the manual flow below. Batch *orchestration* is unit-tested (`statement-batch.test.ts`) because
+- **Few HTTP-level tests.** Only the upload limits (`upload.test.ts`) are tested over HTTP; route
+  wiring and auth are covered only by the manual flow below. Batch *orchestration* is unit-tested (`statement-batch.test.ts`) because
   it lives outside the route handler, but nothing asserts the handler calls it correctly.
 - **No AI-provider tests.** `src/parsers/ai-providers/` is untested.
 - **Fixtures are synthetic.** All three parsers are verified against real statements only by
@@ -158,22 +159,29 @@ Useful response codes:
 
 | Code | Means |
 | --- | --- |
-| `MISSING_FIELD` | No file, or the field wasn't called `statement` |
+| `MISSING_FIELD` | No file, or the field wasn't called `statement` / `statements` |
 | `BANK_UNRECOGNIZED` | No parser's `canParse` matched |
 | `NO_TRANSACTIONS` | A parser claimed the statement but extracted zero rows — the layout changed |
 | `PDF_PASSWORD_REQUIRED` / `PDF_PASSWORD_INCORRECT` | Encrypted PDF |
 | `PDF_UNREADABLE` | Not a PDF, or corrupt |
-| `FILE_TOO_LARGE` / `TOO_MANY_FILES` | Rejected by the upload limits before parsing |
+| `TOO_MANY_FILES` | More than 20 files to `/parse`, or more than 1 to the legacy `/import` |
+| `FILE_TOO_LARGE` | One file is over the 20MB per-file limit |
+| `BATCH_TOO_LARGE` | Every file is under 20MB, but the request is over 50MB in total |
+
+Every upload rejection also logs a `[upload] … rejected with <code>` line on the server, giving
+the number of files received and the total request size.
 
 Branch on `code`, never on the English `error` text.
 
 ### 2b. Parse several statements in one call
 
-`POST /parse/batch` takes the field `statements`, repeated — a month of exports, or one per
-account:
+The same `POST /parse` takes up to 20 files — a month of exports, or one per account. Repeat the
+field (`statement` or `statements`, either works). **The number of files picks the response
+shape:** one file gets the single-statement response above, two or more get the per-file
+response below.
 
 ```bash
-curl -X POST http://localhost:3000/parse/batch \
+curl -X POST http://localhost:3000/parse \
   -H "X-Import-Token: $IMPORT_TOKEN" \
   -F "statements=@Docs/tests/Moey - julho 2026.pdf" \
   -F "statements=@Docs/tests/Activo bank  - Maio 2026.pdf" \
@@ -195,9 +203,9 @@ Things to check when testing it:
 - **`importedId`s must be identical to parsing the same file alone.** This is the one thing that
   can silently corrupt a budget: ids are stamped per *statement*, so a movement appearing in two
   overlapping exports keeps one id and Actual dedupes it. Stamping across the batch instead would
-  give it two ids and import it twice. Verify by diffing a batch-of-one against `POST /parse`.
+  give it two ids and import it twice. Verify by diffing a file's ids in a multi-file response against the same file sent alone.
 - **One `password` applies to every file.** Statements needing a different one come back as
-  `PDF_PASSWORD_REQUIRED`/`INCORRECT`; retry those individually against `/parse`.
+  `PDF_PASSWORD_REQUIRED`/`INCORRECT`; re-send those alone with their own password.
 - Parsing is sequential on purpose — in `PARSER_MODE=ai` each file is a provider call.
 
 `POST /import/confirm` needs no changes to accept a batch: concatenate the reviewed transactions

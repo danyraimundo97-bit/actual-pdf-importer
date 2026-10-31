@@ -17,6 +17,7 @@ export type ErrorCode =
   | 'UNAUTHORIZED'
   | 'TOO_MANY_FILES'
   | 'FILE_TOO_LARGE'
+  | 'BATCH_TOO_LARGE'
   | 'INTERNAL_ERROR';
 
 export class ImporterError extends Error {
@@ -80,16 +81,19 @@ export class NoBudgetSelectedError extends ImporterError {
 }
 
 /**
- * The two ways a multipart upload can be rejected before any parsing. Both
- * exist so multer's own MulterError — which would otherwise escape as an
- * HTML 500 and break the `code`-based contract — maps onto a typed error
- * like every other expected failure.
+ * The ways a multipart upload can be rejected before any parsing (see
+ * upload.ts). They exist so multer's own MulterError — which would otherwise
+ * escape as an HTML 500 and break the `code`-based contract — maps onto a
+ * typed error like every other expected failure. Each one is a different fix
+ * for the client: send fewer files, shrink one file, or split the request.
  */
 export class TooManyFilesError extends ImporterError {
-  constructor(max: number) {
+  /** `received` is a lower bound when the upload was cut off before the end. */
+  constructor(max: number, received: number, receivedIsLowerBound = false, hint = '') {
+    const count = receivedIsLowerBound ? `more than ${received}` : `${received}`;
     super(
       'TOO_MANY_FILES',
-      `Too many files in one request (maximum ${max}), or a file was sent under an unexpected field name.`,
+      `Too many files: received ${count}, the maximum per request is ${max}.${hint ? ` ${hint}` : ''}`,
       400,
     );
   }
@@ -97,6 +101,25 @@ export class TooManyFilesError extends ImporterError {
 
 export class FileTooLargeError extends ImporterError {
   constructor(maxBytes: number) {
-    super('FILE_TOO_LARGE', `A file exceeds the ${Math.round(maxBytes / (1024 * 1024))}MB per-file limit.`, 413);
+    super('FILE_TOO_LARGE', `A file exceeds the ${formatBytes(maxBytes)} per-file limit.`, 413);
   }
+}
+
+/** Every file is under the per-file limit, but together they are too much for one request. */
+export class BatchTooLargeError extends ImporterError {
+  constructor(maxBytes: number, receivedBytes: number) {
+    super(
+      'BATCH_TOO_LARGE',
+      `The upload is ${formatBytes(receivedBytes)} in total, over the ${formatBytes(maxBytes)} per-request limit. ` +
+        'Split the statements over several requests.',
+      413,
+    );
+  }
+}
+
+export function formatBytes(bytes: number): string {
+  const trim = (n: number) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${trim(bytes / 1024)}KB`;
+  return `${trim(bytes / (1024 * 1024))}MB`;
 }
