@@ -7,6 +7,7 @@ class SettingsStore {
   static const _kBudgetSyncId = 'budget_sync_id';
   static const _kBudgetName = 'budget_name';
   static const _kLastAccountId = 'last_account_id';
+  static const _kOnboarded = 'onboarded';
 
   final SharedPreferences _prefs;
 
@@ -23,6 +24,11 @@ class SettingsStore {
 
   String? get lastAccountId => _prefs.getString(_kLastAccountId);
   Future<void> setLastAccountId(String id) => _prefs.setString(_kLastAccountId, id);
+
+  /// Null for installs from before the setup guide existed; AppConfig
+  /// derives a value from the connection settings in that case.
+  bool? get onboarded => _prefs.getBool(_kOnboarded);
+  Future<void> setOnboarded(bool value) => _prefs.setBool(_kOnboarded, value);
 
   Future<void> clear() => _prefs.clear();
 }

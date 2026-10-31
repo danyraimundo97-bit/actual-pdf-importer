@@ -5,9 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api/api_client.dart';
 import 'api/categories_api.dart';
 import 'api/importer_api.dart';
+import 'local/import_history_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
 import 'models/backend_config.dart';
+import 'models/dashboard.dart';
 
 /// Overridden in main() with the real instance obtained via
 /// SharedPreferences.getInstance() before runApp — reading this before
@@ -34,13 +36,23 @@ class AppConfig {
   final String? budgetSyncId;
   final String? budgetName;
 
-  const AppConfig({this.backendUrl, this.budgetSyncId, this.budgetName});
+  /// Whether the welcome + setup flow has been completed. Gates every
+  /// route except the onboarding ones (see core/router.dart).
+  final bool onboarded;
 
-  AppConfig copyWith({String? backendUrl, String? budgetSyncId, String? budgetName}) {
+  const AppConfig({this.backendUrl, this.budgetSyncId, this.budgetName, this.onboarded = false});
+
+  AppConfig copyWith({
+    String? backendUrl,
+    String? budgetSyncId,
+    String? budgetName,
+    bool? onboarded,
+  }) {
     return AppConfig(
       backendUrl: backendUrl ?? this.backendUrl,
       budgetSyncId: budgetSyncId ?? this.budgetSyncId,
       budgetName: budgetName ?? this.budgetName,
+      onboarded: onboarded ?? this.onboarded,
     );
   }
 }
@@ -49,13 +61,19 @@ class AppConfigController extends StateNotifier<AppConfig> {
   final SettingsStore _store;
 
   AppConfigController(this._store)
-      : super(
-          AppConfig(
-            backendUrl: _store.backendUrl,
-            budgetSyncId: _store.budgetSyncId,
-            budgetName: _store.budgetName,
-          ),
-        );
+    : super(
+        AppConfig(
+          backendUrl: _store.backendUrl,
+          budgetSyncId: _store.budgetSyncId,
+          budgetName: _store.budgetName,
+          // Installs from before the setup guide existed have no flag;
+          // if they are already connected to a budget, don't send them
+          // through the welcome screen again.
+          onboarded:
+              _store.onboarded ??
+              ((_store.backendUrl?.isNotEmpty ?? false) && _store.budgetSyncId != null),
+        ),
+      );
 
   Future<void> setBackendUrl(String url) async {
     await _store.setBackendUrl(url);
@@ -66,6 +84,17 @@ class AppConfigController extends StateNotifier<AppConfig> {
     await _store.setBudgetSyncId(syncId);
     await _store.setBudgetName(name);
     state = state.copyWith(budgetSyncId: syncId, budgetName: name);
+  }
+
+  Future<void> setOnboarded(bool value) async {
+    await _store.setOnboarded(value);
+    state = state.copyWith(onboarded: value);
+  }
+
+  /// Forgets every non-secret setting (dev page "wipe everything").
+  Future<void> reset() async {
+    await _store.clear();
+    state = const AppConfig();
   }
 }
 
@@ -94,3 +123,19 @@ final categoriesApiProvider = Provider<CategoriesApi>((ref) {
 final backendConfigProvider = FutureProvider.autoDispose<BackendConfig>((ref) {
   return ref.watch(importerApiProvider).getConfig();
 });
+
+/// GET /dashboard for the active budget. Invalidated after an import so
+/// the numbers reflect what was just added.
+final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) {
+  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
+  return ref.watch(importerApiProvider).getDashboard(budgetSyncId: budgetSyncId);
+});
+
+final importHistoryStoreProvider = Provider<ImportHistoryStore>((ref) {
+  return ImportHistoryStore(ref.watch(sharedPreferencesProvider));
+});
+
+final importHistoryProvider =
+    StateNotifierProvider<ImportHistoryController, List<ImportHistoryEntry>>((ref) {
+      return ImportHistoryController(ref.watch(importHistoryStoreProvider));
+    });

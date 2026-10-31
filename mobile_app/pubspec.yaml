@@ -32,6 +32,7 @@ dependencies:
 
   # Formatting
   intl: ^0.19.0
+  fl_chart: ^1.2.0
 
 dev_dependencies:
   flutter_test:
@@ -40,3 +41,25 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Geist / Geist Mono (SIL OFL, see assets/fonts/OFL.txt), bundled rather
+  # than fetched at runtime so the app never calls out to a font CDN.
+  fonts:
+    - family: Geist
+      fonts:
+        - asset: assets/fonts/Geist-400.ttf
+          weight: 400
+        - asset: assets/fonts/Geist-500.ttf
+          weight: 500
+        - asset: assets/fonts/Geist-600.ttf
+          weight: 600
+        - asset: assets/fonts/Geist-700.ttf
+          weight: 700
+    - family: GeistMono
+      fonts:
+        - asset: assets/fonts/GeistMono-400.ttf
+          weight: 400
+        - asset: assets/fonts/GeistMono-500.ttf
+          weight: 500
+        - asset: assets/fonts/GeistMono-600.ttf
+          weight: 600

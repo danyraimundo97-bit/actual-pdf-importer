@@ -1,27 +1,29 @@
 import 'package:flutter/material.dart';
 
+import 'empty_state.dart';
+
 class ErrorRetry extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final String title;
 
-  const ErrorRetry({super.key, required this.message, required this.onRetry});
+  const ErrorRetry({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.title = 'Something went wrong',
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 32),
-            const SizedBox(height: 8),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
-        ),
-      ),
+    return EmptyState(
+      icon: Icons.cloud_off_outlined,
+      title: title,
+      message: message,
+      actionLabel: 'Try again',
+      actionIcon: Icons.refresh_rounded,
+      onAction: onRetry,
+      isError: true,
     );
   }
 }

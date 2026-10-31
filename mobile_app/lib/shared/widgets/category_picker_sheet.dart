@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
+
 import '../../data/models/actual_category.dart';
 
 class CategoryChoice {
@@ -9,7 +11,7 @@ class CategoryChoice {
   const CategoryChoice(this.id, this.name);
 }
 
-/// Searchable, grouped category picker — shared by the review screen's
+/// Searchable, grouped category picker, shared by the review screen's
 /// per-transaction category chip and the Category Memory "add mapping"
 /// sheet, so both pick from Actual's real categories rather than a
 /// free-text id field.
@@ -44,34 +46,43 @@ class _CategoryPickerSheetState extends State<CategoryPickerSheet> {
       minChildSize: 0.4,
       maxChildSize: 0.95,
       builder: (context, scrollController) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            children: [
-              TextField(
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Search categories',
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-              const SizedBox(height: 8),
-              if (widget.groups.isEmpty)
-                const Expanded(
-                  child: Center(child: Text('No categories loaded from Actual yet.')),
-                )
-              else
-                Expanded(
-                  child: ListView(
-                    controller: scrollController,
-                    children: [
-                      for (final group in sections) _GroupSection(group: group, query: query),
-                    ],
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.gutter, 0, Space.gutter, Space.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Choose a category', style: context.text.titleLarge),
+                  const SizedBox(height: Space.md),
+                  TextField(
+                    autofocus: widget.groups.isNotEmpty,
+                    decoration: const InputDecoration(
+                      hintText: 'Search categories',
+                      prefixIcon: Icon(Icons.search_rounded, size: 20),
+                    ),
+                    onChanged: (v) => setState(() => _query = v),
                   ),
-                ),
-            ],
-          ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: widget.groups.isEmpty
+                  ? const _PickerMessage(
+                      'No categories loaded from Actual yet. Check the connection in Settings.',
+                    )
+                  : sections.isEmpty
+                  ? _PickerMessage('No category matches "${_query.trim()}".')
+                  : ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.only(bottom: Space.xl),
+                      children: [
+                        for (final group in sections) _GroupSection(group: group, query: query),
+                      ],
+                    ),
+            ),
+          ],
         );
       },
     );
@@ -103,16 +114,36 @@ class _GroupSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 4),
-          child: Text(group.name, style: Theme.of(context).textTheme.labelLarge),
+          padding: const EdgeInsets.fromLTRB(Space.gutter, Space.lg, Space.gutter, Space.xs),
+          child: Text(
+            group.name,
+            style: context.text.labelMedium?.copyWith(color: context.colors.onSurfaceVariant),
+          ),
         ),
         for (final category in categories)
           ListTile(
-            dense: true,
+            visualDensity: VisualDensity.compact,
             title: Text(category.name),
             onTap: () => Navigator.pop(context, CategoryChoice(category.id, category.name)),
           ),
       ],
+    );
+  }
+}
+
+class _PickerMessage extends StatelessWidget {
+  final String message;
+
+  const _PickerMessage(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.gutter, Space.lg, Space.gutter, 0),
+      child: Text(
+        message,
+        style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
+      ),
     );
   }
 }

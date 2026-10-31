@@ -26,6 +26,9 @@ class SecretStore {
   Future<void> setPdfPassword(String bankId, String password) =>
       _storage.write(key: '$_kPdfPasswordPrefix$bankId', value: password);
 
+  /// Dev page "wipe everything": token, budget and statement passwords.
+  Future<void> clearAll() => _storage.deleteAll();
+
   Future<void> forgetAllPdfPasswords() async {
     final all = await _storage.readAll();
     for (final key in all.keys) {
