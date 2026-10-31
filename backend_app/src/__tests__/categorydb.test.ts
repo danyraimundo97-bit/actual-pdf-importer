@@ -39,6 +39,17 @@ test('categorydb scopes mappings per budget, with an unscoped fallback', async (
   assert.equal(categorydb.deleteCategoryMapping('CONTINENTE', 'budget-B'), true);
   assert.equal(categorydb.lookupCategory('CONTINENTE', 'budget-B')?.categoryId, 'cat-unscoped');
 
+  // Forgetting everything for one budget clears only that budget's scope:
+  // other budgets and the shared unscoped fallback survive.
+  categorydb.rememberCategory('CONTINENTE', 'cat-b', 'Groceries B', 'budget-B');
+  categorydb.rememberCategory('PINGO DOCE', 'cat-b2', 'Groceries B', 'budget-B');
+  categorydb.rememberCategory('CONTINENTE', 'cat-c', 'Groceries C', 'budget-C');
+  assert.equal(categorydb.clearCategoryMappings('budget-B'), 2);
+  assert.deepEqual(categorydb.listCategoryMappings('budget-B'), []);
+  assert.equal(categorydb.lookupCategory('CONTINENTE', 'budget-C')?.categoryId, 'cat-c');
+  assert.equal(categorydb.lookupCategory('CONTINENTE')?.categoryId, 'cat-unscoped');
+  assert.equal(categorydb.clearCategoryMappings('budget-B'), 0);
+
   categorydb.closeCategoryDb();
   fs.rmSync(dir, { recursive: true, force: true });
 });

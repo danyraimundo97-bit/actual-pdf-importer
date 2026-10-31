@@ -190,6 +190,17 @@ export function deleteCategoryMapping(payee: string, budgetSyncId?: string): boo
   return result.changes > 0;
 }
 
+/**
+ * Forgets every mapping in one budget's scope and returns how many went.
+ * Only that scope: the unscoped bucket is shared by every budget as a
+ * fallback, so clearing one budget must not reach into it.
+ */
+export function clearCategoryMappings(budgetSyncId?: string): number {
+  return getDb()
+    .prepare('DELETE FROM payee_categories WHERE budget_sync_id = ?')
+    .run(normalizeBudget(budgetSyncId)).changes;
+}
+
 export function closeCategoryDb(): void {
   if (db) {
     db.close();

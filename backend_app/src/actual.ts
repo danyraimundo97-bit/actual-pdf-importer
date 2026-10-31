@@ -8,6 +8,12 @@ import type { BudgetRef, BudgetSession } from './budget-session';
  */
 type DedupeBasis = Pick<RawTransaction, 'date' | 'amountCents' | 'payee'>;
 
+/**
+ * Every `imported_id` this app writes starts with this. It's how undoing an
+ * import tells its own transactions apart from anything else in Actual.
+ */
+export const IMPORTED_ID_PREFIX = 'pdfimport-';
+
 const basisOf = (tx: DedupeBasis): string => `${tx.date}|${tx.amountCents}|${tx.payee}`;
 
 /**
@@ -40,7 +46,7 @@ function deriveImportedId(tx: DedupeBasis, occurrence: number): string {
   for (let i = 0; i < basis.length; i++) {
     hash = (hash * 31 + basis.charCodeAt(i)) | 0;
   }
-  return `pdfimport-${hash}`;
+  return `${IMPORTED_ID_PREFIX}${hash}`;
 }
 
 /**
@@ -78,7 +84,7 @@ export async function importToActual(
   budget: BudgetRef,
   accountId: string,
   transactions: ImportableTransaction[],
-): Promise<{ added: number; updated: number; categorized: number }> {
+): Promise<{ added: number; updated: number; categorized: number; addedIds: string[] }> {
   let categorized = 0;
   const payload = assignImportedIds(transactions).map((tx) => {
     // An explicit categoryId from the review screen wins; otherwise fall
@@ -107,7 +113,84 @@ export async function importToActual(
     added: result.added?.length ?? 0,
     updated: result.updated?.length ?? 0,
     categorized,
+    // The ids of the transactions this import created, so it can be undone
+    // later (undoImport). `updated` ones existed before and are never undone.
+    addedIds: result.added ?? [],
   };
+}
+
+/** Starts the note on every transaction an undone import zeroed out. */
+export const REMOVED_NOTE_PREFIX = '[Removed via PDF importer';
+
+function formatCents(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
+/** What undoImport changed, for the backend's removal log (removal-log.ts). */
+export interface SoftDeletedTransaction {
+  transactionId: string;
+  importedId: string;
+  date: string;
+  payee?: string;
+  originalAmountCents: number;
+  originalNotes?: string;
+}
+
+/**
+ * Undoes one import as a soft delete, given the `addedIds` its POST
+ * /import/confirm returned. Nothing is deleted in Actual: each transaction
+ * keeps its place but gets amount 0.00 and a note saying it was removed and
+ * what it was, so balances drop it while the history stays visible. The
+ * returned list is what the caller records in the removal log.
+ *
+ * Only a transaction that is in that list AND still carries this app's
+ * imported_id is touched, so a wrong or tampered id list can't change
+ * anything this app didn't import. Ids that no longer match (deleted in
+ * Actual, another account's, or already removed) count as skipped: undoing
+ * twice is harmless and never overwrites the original amount in the log.
+ */
+export async function undoImport(
+  session: BudgetSession,
+  budget: BudgetRef,
+  accountId: string,
+  transactionIds: string[],
+  now: Date = new Date(),
+): Promise<{ removed: number; skipped: number; softDeleted: SoftDeletedTransaction[] }> {
+  const wanted = new Set(transactionIds);
+  const day = now.toISOString().slice(0, 10);
+  return session.withBudget(budget, async (actual) => {
+    // The whole range: the user may have re-dated a transaction since.
+    const all = (await actual.getTransactions(accountId, '1900-01-01', '2999-12-31')) as Array<{
+      id: string;
+      imported_id?: string | null;
+      imported_payee?: string | null;
+      date: string;
+      amount: number;
+      notes?: string | null;
+    }>;
+    const ours = all.filter(
+      (t) =>
+        wanted.has(t.id) &&
+        typeof t.imported_id === 'string' &&
+        t.imported_id.startsWith(IMPORTED_ID_PREFIX) &&
+        !(t.notes ?? '').startsWith(REMOVED_NOTE_PREFIX),
+    );
+
+    const softDeleted: SoftDeletedTransaction[] = [];
+    for (const t of ours) {
+      const was = `${REMOVED_NOTE_PREFIX} on ${day}, was ${formatCents(t.amount)}]`;
+      await actual.updateTransaction(t.id, { amount: 0, notes: t.notes ? `${was} ${t.notes}` : was });
+      softDeleted.push({
+        transactionId: t.id,
+        importedId: t.imported_id as string,
+        date: t.date,
+        payee: t.imported_payee ?? undefined,
+        originalAmountCents: t.amount,
+        originalNotes: t.notes ?? undefined,
+      });
+    }
+    return { removed: ours.length, skipped: wanted.size - ours.length, softDeleted };
+  });
 }
 
 /**

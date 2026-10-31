@@ -56,5 +56,6 @@ export const actualSdkAdapter: ActualAdapter = {
     getPayees: actualApi.getPayees,
     getTransactions: actualApi.getTransactions,
     importTransactions: actualApi.importTransactions,
+    updateTransaction: actualApi.updateTransaction,
   },
 };

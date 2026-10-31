@@ -14,6 +14,15 @@ class ImportHistoryEntry {
   final int updated;
   final DateTime at;
 
+  /// What undoing the import needs: where it went and what it created.
+  /// Absent on entries saved before undo existed, which can't be undone.
+  final String? accountId;
+  final String? budgetSyncId;
+  final List<String> addedIds;
+
+  /// Set once the import was undone; the entry stays, marked as such.
+  final DateTime? undoneAt;
+
   const ImportHistoryEntry({
     required this.filename,
     required this.bankId,
@@ -21,7 +30,26 @@ class ImportHistoryEntry {
     required this.added,
     required this.updated,
     required this.at,
+    this.accountId,
+    this.budgetSyncId,
+    this.addedIds = const [],
+    this.undoneAt,
   });
+
+  bool get canUndo => undoneAt == null && accountId != null && addedIds.isNotEmpty;
+
+  ImportHistoryEntry markedUndone(DateTime when) => ImportHistoryEntry(
+    filename: filename,
+    bankId: bankId,
+    accountName: accountName,
+    added: added,
+    updated: updated,
+    at: at,
+    accountId: accountId,
+    budgetSyncId: budgetSyncId,
+    addedIds: addedIds,
+    undoneAt: when,
+  );
 
   Map<String, dynamic> toJson() => {
     'filename': filename,
@@ -30,6 +58,10 @@ class ImportHistoryEntry {
     'added': added,
     'updated': updated,
     'at': at.toIso8601String(),
+    if (accountId != null) 'accountId': accountId,
+    if (budgetSyncId != null) 'budgetSyncId': budgetSyncId,
+    'addedIds': addedIds,
+    if (undoneAt != null) 'undoneAt': undoneAt!.toIso8601String(),
   };
 
   factory ImportHistoryEntry.fromJson(Map<String, dynamic> json) => ImportHistoryEntry(
@@ -39,6 +71,10 @@ class ImportHistoryEntry {
     added: json['added'] as int,
     updated: json['updated'] as int,
     at: DateTime.parse(json['at'] as String),
+    accountId: json['accountId'] as String?,
+    budgetSyncId: json['budgetSyncId'] as String?,
+    addedIds: (json['addedIds'] as List?)?.cast<String>() ?? const [],
+    undoneAt: json['undoneAt'] == null ? null : DateTime.parse(json['undoneAt'] as String),
   );
 }
 
@@ -75,6 +111,11 @@ class ImportHistoryController extends StateNotifier<List<ImportHistoryEntry>> {
 
   Future<void> add(ImportHistoryEntry entry) async {
     state = [entry, ...state].take(ImportHistoryStore.maxEntries).toList();
+    await _store.write(state);
+  }
+
+  Future<void> markUndone(ImportHistoryEntry entry) async {
+    state = [for (final e in state) identical(e, entry) ? e.markedUndone(DateTime.now()) : e];
     await _store.write(state);
   }
 

@@ -43,6 +43,7 @@ export type ActualPort = Pick<
   | 'getPayees'
   | 'getTransactions'
   | 'importTransactions'
+  | 'updateTransaction'
 >;
 
 /**

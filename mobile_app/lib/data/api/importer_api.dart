@@ -145,6 +145,30 @@ class ImporterApi {
   /// Maps Dio failures to [ApiException], and rejects a reply that isn't a
   /// JSON object: every importer route answers with one, so anything else
   /// (typically an HTML page) means the URL points at some other server.
+  /// POST /import/undo: soft-deletes the transactions one import added —
+  /// in Actual they become 0.00 with a "removed" note, nothing is deleted.
+  /// Only ones the importer created are touched (see the backend).
+  Future<({int removed, int skipped})> undoImport({
+    required String accountId,
+    required List<String> transactionIds,
+    String? budgetSyncId,
+    String? budgetPassword,
+  }) async {
+    final res = await _guarded(
+      () => _dio.post(
+        '/import/undo',
+        data: {
+          'accountId': accountId,
+          'transactionIds': transactionIds,
+          if (budgetSyncId != null) 'budgetSyncId': budgetSyncId,
+          if (budgetPassword != null) 'budgetPassword': budgetPassword,
+        },
+      ),
+    );
+    final data = res.data as Map<String, dynamic>;
+    return (removed: data['removed'] as int, skipped: data['skipped'] as int);
+  }
+
   Future<Response<dynamic>> _guarded(Future<Response<dynamic>> Function() call) async {
     final Response<dynamic> res;
     try {

@@ -143,11 +143,66 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             added: result.added,
             updated: result.updated,
             at: DateTime.now(),
+            accountId: account.id,
+            budgetSyncId: config.budgetSyncId,
+            addedIds: result.addedIds,
           ),
         );
     ref.invalidate(dashboardProvider);
     // The import remembered each payee's category on the backend.
     ref.read(categoryMemoryRevisionProvider.notifier).state++;
+  }
+
+  /// Soft-deletes the transactions one import added, after confirmation:
+  /// they stay in Actual at 0.00 with a note. Uses the budget the import went
+  /// into, not the currently selected one.
+  Future<void> _undo(ImportHistoryEntry entry) async {
+    final count = entry.addedIds.length;
+    final noun = count == 1 ? 'transaction' : 'transactions';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove this import?'),
+        content: Text(
+          'The $count $noun that "${entry.filename}" added to ${entry.accountName} will be set to '
+          '0.00 in Actual, with a note saying they were removed by this app. Nothing is deleted, '
+          'and transactions that were already there before are not touched.\n\n'
+          'Importing the same statement again will not bring them back.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.colors.error,
+              foregroundColor: context.colors.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final outcome = await ref
+          .read(importerApiProvider)
+          .undoImport(
+            accountId: entry.accountId!,
+            transactionIds: entry.addedIds,
+            budgetSyncId: entry.budgetSyncId,
+          );
+      await ref.read(importHistoryProvider.notifier).markUndone(entry);
+      ref.invalidate(dashboardProvider);
+      if (!mounted) return;
+      final skipped = outcome.skipped == 0
+          ? ''
+          : ' ${outcome.skipped} were already removed or no longer in Actual.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Removed ${outcome.removed} $noun.$skipped')),
+      );
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   @override
@@ -216,7 +271,8 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
               const SizedBox(height: Space.xxl),
               Text('Recent imports', style: context.text.titleLarge),
               const SizedBox(height: Space.sm),
-              for (final entry in history.take(6)) _HistoryRow(entry: entry),
+              for (final entry in history.take(6))
+                _HistoryRow(entry: entry, onUndo: entry.canUndo ? () => _undo(entry) : null),
             ],
           ],
         ),
@@ -461,7 +517,11 @@ class _InboxTile extends StatelessWidget {
 class _HistoryRow extends StatelessWidget {
   final ImportHistoryEntry entry;
 
-  const _HistoryRow({required this.entry});
+  /// Null when the entry can't be removed (already removed, or saved before
+  /// removing existed).
+  final VoidCallback? onUndo;
+
+  const _HistoryRow({required this.entry, this.onUndo});
 
   @override
   Widget build(BuildContext context) {
@@ -493,10 +553,22 @@ class _HistoryRow extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text('+${entry.added}', style: figures(context.text.bodyMedium)),
+              Text(
+                entry.undoneAt != null ? 'Removed' : '+${entry.added}',
+                style: figures(context.text.bodyMedium).copyWith(
+                  color: entry.undoneAt != null ? context.colors.onSurfaceVariant : null,
+                ),
+              ),
               Text(formatDisplayDate(entry.at), style: figures(context.text.bodySmall)),
             ],
           ),
+          if (onUndo != null)
+            IconButton(
+              icon: const Icon(Icons.undo_rounded, size: 20),
+              tooltip: 'Remove this import',
+              visualDensity: VisualDensity.compact,
+              onPressed: onUndo,
+            ),
         ],
       ),
     );

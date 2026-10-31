@@ -99,6 +99,10 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
       builder: (context) => _MappingEditSheet(existing: existing, categoryGroups: _categoryGroups),
     );
     if (result == null) return;
+    if (result.forget && existing != null) {
+      await _delete(existing);
+      return;
+    }
     final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
     try {
       await ref
@@ -109,6 +113,47 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
             categoryName: result.categoryName,
             budgetSyncId: budgetSyncId,
           );
+      await _load();
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// Forgets every mapping of the current budget, after confirmation. No
+  /// Undo here (unlike a single row): the dialog is the safeguard.
+  Future<void> _forgetAll() async {
+    final count = _mappings.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Forget all mappings?'),
+        content: Text(
+          'This removes all $count remembered payee → category mappings for this budget. '
+          'Future imports will arrive uncategorized until the memory is rebuilt. '
+          'Nothing in Actual itself changes.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.colors.error,
+              foregroundColor: context.colors.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Forget all'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    try {
+      final deleted = await ref.read(categoriesApiProvider).clear(budgetSyncId: budgetSyncId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Forgot $deleted ${deleted == 1 ? 'mapping' : 'mappings'}.')),
+        );
+      }
       await _load();
     } on ApiException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -173,6 +218,12 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
       appBar: AppBar(
         title: const Text('Category memory'),
         actions: [
+          if (hasList)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_outlined),
+              tooltip: 'Forget all',
+              onPressed: _forgetAll,
+            ),
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: 'Learn from Actual',
@@ -324,7 +375,15 @@ class _MappingEditResult {
   final String categoryId;
   final String? categoryName;
 
-  const _MappingEditResult({required this.payee, required this.categoryId, this.categoryName});
+  /// The user chose "Forget" instead of saving.
+  final bool forget;
+
+  const _MappingEditResult({
+    required this.payee,
+    required this.categoryId,
+    this.categoryName,
+    this.forget = false,
+  });
 }
 
 class _MappingEditSheet extends StatefulWidget {
@@ -424,6 +483,27 @@ class _MappingEditSheetState extends State<_MappingEditSheet> {
           Text(
             'Choose a category for this payee.',
             style: context.text.bodySmall?.copyWith(color: context.colors.error),
+          ),
+        ],
+        // A visible way to forget a mapping: the list's swipe gesture is
+        // easy to miss, and awkward with a mouse on desktop.
+        if (editing) ...[
+          const SizedBox(height: Space.lg),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: context.colors.error),
+              onPressed: () => Navigator.pop(
+                context,
+                _MappingEditResult(
+                  payee: widget.existing!.payee,
+                  categoryId: widget.existing!.categoryId,
+                  forget: true,
+                ),
+              ),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: const Text('Forget this mapping'),
+            ),
           ),
         ],
       ],

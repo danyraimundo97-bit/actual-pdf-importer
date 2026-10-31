@@ -53,6 +53,18 @@ class CategoriesApi {
     );
   }
 
+  /// DELETE /categories: forgets every mapping of the budget. Returns how
+  /// many were removed.
+  Future<int> clear({String? budgetSyncId}) async {
+    final res = await _guarded(
+      () => _dio.delete(
+        '/categories',
+        queryParameters: {if (budgetSyncId != null) 'budgetSyncId': budgetSyncId},
+      ),
+    );
+    return (res.data as Map<String, dynamic>)['deleted'] as int;
+  }
+
   Future<({int learned, int scanned})> learnFromActual({
     required String accountId,
     required String startDate,

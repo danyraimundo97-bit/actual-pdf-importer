@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBudgetSession } from '../budget-session';
-import { assignImportedIds, importToActual, listAccounts, listBudgets, listCategoryGroups } from '../actual';
+import {
+  assignImportedIds,
+  importToActual,
+  listAccounts,
+  listBudgets,
+  listCategoryGroups,
+  undoImport,
+} from '../actual';
 import { makeFakeAdapter, SERVER } from './fake-actual';
 
 // These tests deliberately give every transaction an explicit categoryId:
@@ -30,7 +37,7 @@ test('importToActual imports into the requested budget and maps the payload', as
     { ...tx, payee: 'OTHER', categoryId: 'cat-2' }, // no importedId: derived
   ]);
 
-  assert.deepEqual(result, { added: 1, updated: 0, categorized: 2 });
+  assert.deepEqual(result, { added: 1, updated: 0, categorized: 2, addedIds: ['x'] });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].accountId, 'acc-1');
   assert.equal(calls[0].loaded, 'budget-A'); // ran with the right budget loaded
@@ -80,6 +87,53 @@ test('listAccounts runs with the requested budget loaded', async () => {
   const accounts = await listAccounts(session, { syncId: 'budget-B' });
 
   assert.deepEqual(accounts, [{ id: 'acc-1', loaded: 'budget-B' }]);
+});
+
+test('undoImport zeroes and annotates only listed transactions this app imported', async () => {
+  const updates: Array<{ id: string; fields: unknown }> = [];
+  const fake = makeFakeAdapter({
+    getTransactions: (async () => [
+      // ours and listed: soft-deleted
+      { id: 't1', imported_id: 'pdfimport-123', imported_payee: 'CONTINENTE', date: '2026-03-01', amount: -1234, notes: 'raw line' },
+      { id: 't2', imported_id: 'pdfimport-456', date: '2026-03-02', amount: -500 }, // ours, not listed
+      { id: 't3', imported_id: 'bank-sync-789', date: '2026-03-03', amount: -700 }, // listed, not ours
+      { id: 't4', imported_id: null, date: '2026-03-04', amount: -900 }, // listed, typed by hand
+      // listed and ours, but already removed: must not be zeroed or logged again
+      { id: 't5', imported_id: 'pdfimport-999', date: '2026-03-05', amount: 0, notes: '[Removed via PDF importer on 2026-03-06, was -1.00]' },
+    ]),
+    updateTransaction: (async (id: string, fields: unknown) => {
+      updates.push({ id, fields });
+      return [];
+    }),
+  });
+  const session = createBudgetSession(SERVER, fake.adapter);
+
+  const result = await undoImport(
+    session,
+    { syncId: 'budget-A' },
+    'acc-1',
+    ['t1', 't3', 't4', 't5', 'gone'],
+    new Date('2026-10-31T12:00:00Z'),
+  );
+
+  assert.deepEqual(updates, [
+    { id: 't1', fields: { amount: 0, notes: '[Removed via PDF importer on 2026-10-31, was -12.34] raw line' } },
+  ]);
+  assert.deepEqual(result, {
+    removed: 1,
+    skipped: 4,
+    softDeleted: [
+      {
+        transactionId: 't1',
+        importedId: 'pdfimport-123',
+        date: '2026-03-01',
+        payee: 'CONTINENTE',
+        originalAmountCents: -1234,
+        originalNotes: 'raw line',
+      },
+    ],
+  });
+  assert.equal(fake.state.loaded, 'budget-A');
 });
 
 test('listBudgets returns the sync id (groupId), not the file id, and downloads no budget', async () => {

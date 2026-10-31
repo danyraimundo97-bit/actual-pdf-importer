@@ -4,11 +4,13 @@ import express, { NextFunction, Request, Response } from 'express';
 import { processStatement, PARSER_MODE } from './index';
 import { ImporterError, NoBudgetSelectedError } from './errors';
 import { receiveFiles } from './upload';
+import { recordRemovals } from './removal-log';
 import { parseStatements, summarize } from './statement-batch';
 import { getAiProvider } from './parsers/ai-providers';
 import {
   assignImportedIds,
   importToActual,
+  undoImport,
   learnCategoriesFromActual,
   listAccounts,
   listBudgets,
@@ -17,7 +19,13 @@ import {
 import { actualSdkAdapter, isHandledSdkError } from './actual-adapter';
 import { getDashboard } from './dashboard';
 import { BudgetRef, createBudgetSession } from './budget-session';
-import { deleteCategoryMapping, listCategoryMappings, lookupCategory, rememberCategory } from './categorydb';
+import {
+  clearCategoryMappings,
+  deleteCategoryMapping,
+  listCategoryMappings,
+  lookupCategory,
+  rememberCategory,
+} from './categorydb';
 
 const app = express();
 app.use(express.json());
@@ -233,6 +241,44 @@ app.post('/import/confirm', async (req: Request, res: Response) => {
 });
 
 /**
+ * Undoes one import as a soft delete: the transactions it added get amount
+ * 0.00 and a "removed" note in Actual (nothing is deleted there), and the
+ * originals are kept in the backend's removal log. Body: { accountId,
+ * transactionIds } where transactionIds is the `addedIds` that import's
+ * POST /import/confirm returned. See undoImport for why a wrong id can't
+ * touch anything this app didn't import.
+ */
+app.post('/import/undo', async (req: Request, res: Response) => {
+  const { accountId, transactionIds, budgetSyncId, budgetPassword } = req.body ?? {};
+
+  if (!accountId) {
+    return res
+      .status(400)
+      .json({ error: 'Missing required field "accountId" (the account the import went into).', code: 'MISSING_FIELD' });
+  }
+  if (
+    !Array.isArray(transactionIds) ||
+    transactionIds.length === 0 ||
+    !transactionIds.every((id) => typeof id === 'string' && id)
+  ) {
+    return res.status(400).json({
+      error: 'Missing or invalid "transactionIds": the addedIds returned by POST /import/confirm.',
+      code: 'MISSING_FIELD',
+    });
+  }
+
+  try {
+    const budget = resolveBudgetRef(budgetSyncId, budgetPassword);
+    const { removed, skipped, softDeleted } = await undoImport(budgetSession, budget, accountId, transactionIds);
+    const removedAt = new Date().toISOString();
+    recordRemovals(softDeleted.map((t) => ({ ...t, budgetSyncId: budget.syncId, accountId, removedAt })));
+    return res.json({ removed, skipped });
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while undoing the import.');
+  }
+});
+
+/**
  * Kept unchanged for backwards compatibility: parse-and-import in one
  * shot, no review step. New clients should prefer POST /parse followed by
  * POST /import/confirm.
@@ -346,6 +392,12 @@ app.post('/categories', (req: Request, res: Response) => {
   }
   rememberCategory(payee, categoryId, categoryName, resolveBudgetScope(budgetSyncId));
   res.status(204).end();
+});
+
+/** Forgets every mapping of the budget in scope. Answers how many were removed. */
+app.delete('/categories', (req: Request, res: Response) => {
+  const budgetSyncId = resolveBudgetScope(req.query.budgetSyncId);
+  res.json({ deleted: clearCategoryMappings(budgetSyncId) });
 });
 
 app.delete('/categories/:payee', (req: Request, res: Response) => {
