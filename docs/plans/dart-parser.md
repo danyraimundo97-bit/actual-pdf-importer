@@ -329,6 +329,20 @@ repopulate.
   they're added the database won't open in a web build. Android, iOS and desktop bundle SQLite
   through the sqlite3 build hook.
 
+### Phase 4b as built (2026-11-02)
+
+- `CategoryMemorySource` (`lib/data/category_memory_source.dart`): the Category memory screen
+  uses the backend's memory (`BackendCategoryMemory`) while Actual is connected with a budget, and
+  the phone's (`LocalCategoryMemory`) otherwise, including when the backend doesn't answer. It
+  switches when the link state changes. "Learn from Actual" shows only with the backend; the
+  phone's empty state explains that exporting from Review teaches it.
+- Settings → Categories → "Edit categories" (`/settings/category-list`, `CategoriesScreen`):
+  rename groups and categories, hide and show, add a category to a group or a new group, and
+  "Show hidden predefined categories" (renames and the user's own choices stay). Nothing is
+  deleted: a hidden category keeps its mappings, isn't suggested, and comes back when shown. User
+  ids are `local:<uuid v4>`.
+- Not done: reordering (the `sort` column is there; the screen has no drag handles yet).
+
 ## Phase 5 — App integration
 
 In `features/import/inbox_controller.dart`, per queued PDF:

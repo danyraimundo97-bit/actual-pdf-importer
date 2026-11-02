@@ -112,4 +112,71 @@ void main() {
       expect(await store.suggest('LIDL'), isNull);
     });
   });
+
+  group('managing categories', () {
+    test('a user category gets a local id, sorts last and can be picked and remembered', () async {
+      final id = await store.addCategory(presetId('food'), '  Bakery   goods ');
+      expect(id, startsWith('local:'));
+      expect(LocalCategoryStore.isLocalId(id), isTrue);
+
+      final food = (await store.groups()).firstWhere((g) => g.name == 'Food');
+      expect(food.categories.last.name, 'Bakery goods');
+
+      await store.remember('PADARIA', id);
+      expect((await store.suggest('padaria'))?.categoryName, 'Bakery goods');
+    });
+
+    test('a user group goes after the other expense groups, before income', () async {
+      await store.addGroup('Pets');
+      final names = (await store.groups()).map((g) => g.name).toList();
+      expect(names, isNot(contains('Pets')), reason: 'empty groups stay out of the picker');
+      final all = (await store.allGroups()).map((g) => g.name).toList();
+      expect(all.indexOf('Pets'), all.indexOf('Income') - 1);
+    });
+
+    test('renaming changes the name everywhere, mappings included', () async {
+      await store.remember('LIDL', presetId('food.groceries'));
+      await store.renameCategory(presetId('food.groceries'), 'Supermarket');
+      expect((await store.suggest('LIDL'))?.categoryName, 'Supermarket');
+      expect((await store.mappings()).single.categoryName, 'Supermarket');
+    });
+
+    test('an empty name is refused', () async {
+      expect(() => store.renameCategory(presetId('food.groceries'), '   '), throwsArgumentError);
+    });
+
+    test('hiding stops suggestions but keeps the mapping; showing brings it back', () async {
+      final restaurants = presetId('food.restaurants');
+      await store.remember('CAFE CENTRAL', restaurants);
+      await store.setCategoryHidden(restaurants, true);
+      expect(await store.suggest('CAFE CENTRAL'), isNull);
+      expect(await store.mappings(), hasLength(1));
+
+      await store.setCategoryHidden(restaurants, false);
+      expect((await store.suggest('CAFE CENTRAL'))?.categoryId, restaurants);
+    });
+
+    test('restoring brings back hidden presets only', () async {
+      final user = await store.addCategory(presetId('food'), 'Bakery');
+      await store.setCategoryHidden(user, true);
+      await store.setCategoryHidden(presetId('food.groceries'), true);
+      await store.renameCategory(presetId('food.restaurants'), 'Eating out');
+
+      expect(await store.restoreHiddenPresets(), 1);
+      final food = (await store.allGroups()).firstWhere((g) => g.name == 'Food');
+      final byId = {for (final c in food.categories) c.id: c};
+      expect(byId[presetId('food.groceries')]!.hidden, isFalse);
+      expect(byId[user]!.hidden, isTrue, reason: "the user's own choice stays");
+      expect(byId[presetId('food.restaurants')]!.name, 'Eating out');
+    });
+
+    test('forget all leaves tombstones for one scope only', () async {
+      await store.remember('A', presetId('food.groceries'));
+      await store.remember('B', presetId('food.groceries'));
+      await store.remember('C', presetId('food.groceries'), budgetSyncId: 'b1');
+      expect(await store.clear(), 2);
+      expect(await store.mappings(), isEmpty);
+      expect(await store.mappings(budgetSyncId: 'b1'), hasLength(1));
+    });
+  });
 }

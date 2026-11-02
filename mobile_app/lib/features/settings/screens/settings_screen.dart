@@ -160,19 +160,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onSelect: _selectBudget,
             ),
           const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Category memory'),
+          const _SectionTitle('Categories'),
           Text(
-            'The payee to category mappings that pre-fill categories when you import or add.',
+            'The payee to category mappings that pre-fill categories when you import or add, '
+            "and the app's own categories, used until Actual is connected.",
             style: muted,
           ),
           const SizedBox(height: Space.lg),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () => context.push('/settings/categories'),
-              icon: const Icon(Icons.sell_outlined, size: 18),
-              label: const Text('Open category memory'),
-            ),
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => context.push('/settings/categories'),
+                icon: const Icon(Icons.sell_outlined, size: 18),
+                label: const Text('Open category memory'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => context.push('/settings/category-list'),
+                icon: const Icon(Icons.category_outlined, size: 18),
+                label: const Text('Edit categories'),
+              ),
+            ],
           ),
           const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Privacy'),

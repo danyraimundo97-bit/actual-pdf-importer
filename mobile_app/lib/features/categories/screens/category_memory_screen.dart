@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/category_memory_source.dart';
 import '../../../data/models/actual_account.dart';
 import '../../../data/models/actual_category.dart';
 import '../../../data/models/category_mapping.dart';
@@ -23,6 +24,8 @@ class CategoryMemoryScreen extends ConsumerStatefulWidget {
 }
 
 class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
+  /// Null until the first load picks the backend's memory or the phone's.
+  CategoryMemorySource? _source;
   List<CategoryMapping> _mappings = [];
   List<ActualCategoryGroup> _categoryGroups = [];
   bool _loading = true;
@@ -40,14 +43,12 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
       _loading = true;
       _error = null;
     });
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
     try {
-      final results = await Future.wait([
-        ref.read(categoriesApiProvider).list(budgetSyncId: budgetSyncId),
-        ref.read(importerApiProvider).getActualCategories(budgetSyncId: budgetSyncId),
-      ]);
+      final source = await _resolveSource();
+      final results = await Future.wait([source.list(), source.categoryGroups()]);
       if (!mounted) return;
       setState(() {
+        _source = source;
         _mappings = results[0] as List<CategoryMapping>;
         _categoryGroups = results[1] as List<ActualCategoryGroup>;
       });
@@ -58,10 +59,29 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
     }
   }
 
+  /// The backend's memory while Actual is connected with a budget; the
+  /// phone's otherwise, including when the backend doesn't answer.
+  Future<CategoryMemorySource> _resolveSource() async {
+    final config = ref.read(appConfigProvider);
+    var actualReady = false;
+    if (config.backendUrl?.isNotEmpty ?? false) {
+      try {
+        // build() watches linkStateProvider, which keeps it alive here.
+        actualReady = await ref.read(linkStateProvider.future) == LinkState.ready;
+      } catch (_) {
+        actualReady = false;
+      }
+    }
+    return actualReady
+        ? BackendCategoryMemory(ref.read(categoriesApiProvider), ref.read(importerApiProvider), config.budgetSyncId)
+        : LocalCategoryMemory(ref.read(localCategoryStoreProvider), config.budgetSyncId);
+  }
+
   Future<void> _delete(CategoryMapping mapping) async {
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    final source = _source;
+    if (source == null) return;
     try {
-      await ref.read(categoriesApiProvider).delete(mapping.payee, budgetSyncId: budgetSyncId);
+      await source.delete(mapping.payee);
       if (!mounted) return;
       setState(() => _mappings.removeWhere((m) => m.payee == mapping.payee));
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,16 +96,10 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
   }
 
   Future<void> _restore(CategoryMapping mapping) async {
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    final source = _source;
+    if (source == null) return;
     try {
-      await ref
-          .read(categoriesApiProvider)
-          .upsert(
-            payee: mapping.payee,
-            categoryId: mapping.categoryId,
-            categoryName: mapping.categoryName,
-            budgetSyncId: budgetSyncId,
-          );
+      await source.upsert(payee: mapping.payee, categoryId: mapping.categoryId, categoryName: mapping.categoryName);
       await _load();
     } on ApiException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -103,16 +117,10 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
       await _delete(existing);
       return;
     }
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    final source = _source;
+    if (source == null) return;
     try {
-      await ref
-          .read(categoriesApiProvider)
-          .upsert(
-            payee: result.payee,
-            categoryId: result.categoryId,
-            categoryName: result.categoryName,
-            budgetSyncId: budgetSyncId,
-          );
+      await source.upsert(payee: result.payee, categoryId: result.categoryId, categoryName: result.categoryName);
       await _load();
     } on ApiException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
@@ -146,9 +154,10 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
       ),
     );
     if (confirmed != true) return;
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    final source = _source;
+    if (source == null) return;
     try {
-      final deleted = await ref.read(categoriesApiProvider).clear(budgetSyncId: budgetSyncId);
+      final deleted = await source.clear();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Forgot $deleted ${deleted == 1 ? 'mapping' : 'mappings'}.')),
@@ -199,6 +208,12 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
     // or the list keeps showing what it loaded at startup.
     ref.listen(categoryMemoryRevisionProvider, (_, _) => _load());
     ref.listen(appConfigProvider.select((c) => c.budgetSyncId), (_, _) => _load());
+    // Connecting or disconnecting Actual switches between the backend's
+    // memory and the phone's.
+    ref.listen(linkStateProvider, (previous, next) {
+      if (previous?.valueOrNull != next.valueOrNull) _load();
+    });
+    final local = _source?.isLocal ?? false;
     final query = _query.trim().toLowerCase();
     final filtered = query.isEmpty
         ? _mappings
@@ -224,11 +239,12 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
               tooltip: 'Forget all',
               onPressed: _forgetAll,
             ),
-          IconButton(
-            icon: const Icon(Icons.sync_rounded),
-            tooltip: 'Learn from Actual',
-            onPressed: _learnFromActual,
-          ),
+          if (!local)
+            IconButton(
+              icon: const Icon(Icons.sync_rounded),
+              tooltip: 'Learn from Actual',
+              onPressed: _learnFromActual,
+            ),
           const SizedBox(width: Space.sm),
         ],
       ),
@@ -244,7 +260,18 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
           : _error != null
           ? ErrorRetry(title: 'Could not load category memory', message: _error!, onRetry: _load)
           : _mappings.isEmpty
-          ? EmptyState(
+          ? local
+                ? EmptyState(
+                    icon: Icons.sell_outlined,
+                    title: 'Nothing remembered yet',
+                    message:
+                        'Pick categories when you review a statement and export it. The phone '
+                        'remembers each payee, and the next statement gets that category automatically.',
+                    actionLabel: 'Add mapping',
+                    actionIcon: Icons.add_rounded,
+                    onAction: () => _addOrEdit(),
+                  )
+                : EmptyState(
               icon: Icons.sell_outlined,
               title: 'Nothing remembered yet',
               message:
