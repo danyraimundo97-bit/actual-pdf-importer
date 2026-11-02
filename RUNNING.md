@@ -26,8 +26,8 @@ Edit `.env` — at minimum:
 
 | Variable | What to set |
 | --- | --- |
-| `ACTUAL_SERVER_URL` | URL of your Actual server (e.g. `http://localhost:5006`) |
-| `ACTUAL_PASSWORD` | Your Actual server password |
+| `ACTUAL_SERVER_URL` | Optional: URL of your Actual server (e.g. `http://localhost:5006`). Empty = connect from the app; set = locked to this server |
+| `ACTUAL_PASSWORD` | Your Actual server password (with `ACTUAL_SERVER_URL`) |
 | `ACTUAL_BUDGET_SYNC_ID` | Default budget's sync id (Actual → Settings → Show advanced settings) |
 | `IMPORT_TOKEN` | A shared secret the app must send. Leave empty only for quick local tests (no auth) |
 | `PARSER_MODE` | `regex` (default, fully offline), `ai`, or `both` |

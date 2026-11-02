@@ -159,3 +159,103 @@ test('shutdown waits for in-flight work instead of killing it', async () => {
   assert.deepEqual(order, ['work done', 'shutdown']);
   assert.equal(state.shutdowns, 1);
 });
+
+// --- Optional connection, reconfigure, sync throttling --------------------
+
+test('with no server configured, every turn fails with ACTUAL_NOT_CONFIGURED and the SDK is never touched', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const session = createBudgetSession(null, adapter);
+
+  assert.equal(session.isConfigured(), false);
+  await assert.rejects(session.withBudget({ syncId: 'A' }, async () => {}), { code: 'ACTUAL_NOT_CONFIGURED' });
+  await assert.rejects(session.withServer(async () => {}), { code: 'ACTUAL_NOT_CONFIGURED' });
+  assert.equal(state.inits, 0);
+  assert.deepEqual(state.downloads, []);
+});
+
+test('reconfigure waits for in-flight work, closes the connection and forgets the loaded budget', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const session = createBudgetSession(SERVER, adapter);
+  await session.withBudget({ syncId: 'A' }, async () => {});
+
+  let finished = false;
+  const running = session.withBudget({ syncId: 'A' }, async () => {
+    await tick(15);
+    finished = true;
+  });
+  await session.reconfigure({ ...SERVER, serverURL: 'http://other' });
+  assert.equal(finished, true, 'reconfigure ran only after the in-flight turn');
+  await running;
+
+  assert.equal(state.shutdowns, 1);
+  await session.withBudget({ syncId: 'A' }, async () => {});
+  assert.equal(state.inits, 2, 're-initialized against the new server');
+  assert.deepEqual(state.downloads, ['A', 'A'], 're-downloaded: nothing counted as loaded');
+});
+
+test('reconfigure(null) disconnects; reconfiguring again reconnects without a restart', async () => {
+  const { adapter } = makeFakeAdapter();
+  const session = createBudgetSession(SERVER, adapter);
+  await session.withServer(async () => {});
+
+  await session.reconfigure(null);
+  assert.equal(session.isConfigured(), false);
+  await assert.rejects(session.withServer(async () => {}), { code: 'ACTUAL_NOT_CONFIGURED' });
+
+  await session.reconfigure(SERVER);
+  assert.equal(session.isConfigured(), true);
+  await session.withServer(async () => {});
+});
+
+test('reads within the sync interval reuse the local copy; after it they sync', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  let clock = 1_000;
+  const session = createBudgetSession(SERVER, adapter, { syncIntervalMs: 5_000, now: () => clock });
+
+  await session.withBudget({ syncId: 'A' }, async () => {}); // download counts as fresh
+  clock += 4_000;
+  await session.withBudget({ syncId: 'A' }, async () => {});
+  assert.deepEqual(state.syncs, [], 'within 5 s of the download: no sync');
+
+  clock += 1_000;
+  await session.withBudget({ syncId: 'A' }, async () => {});
+  assert.deepEqual(state.syncs, ['A'], '5 s later: synced');
+
+  clock += 1_000;
+  await session.withBudget({ syncId: 'A' }, async () => {});
+  assert.deepEqual(state.syncs, ['A'], 'the sync reset the interval');
+});
+
+test('a write turn always syncs before, and pushes after, even inside the interval', async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const clock = 1_000;
+  const session = createBudgetSession(SERVER, adapter, { syncIntervalMs: 60_000, now: () => clock });
+  await session.withBudget({ syncId: 'A' }, async () => {});
+
+  let syncsWhenWriting = -1;
+  await session.withBudget(
+    { syncId: 'A' },
+    async () => {
+      syncsWhenWriting = state.syncs.length;
+    },
+    { write: true },
+  );
+  assert.equal(syncsWhenWriting, 1, 'synced before the write');
+  assert.equal(state.syncs.length, 2, 'and pushed after it');
+});
+
+test("a failed push after a write doesn't fail the write", async () => {
+  const { adapter, state } = makeFakeAdapter();
+  const session = createBudgetSession(SERVER, adapter);
+  await session.withBudget({ syncId: 'A' }, async () => {});
+
+  const result = await session.withBudget(
+    { syncId: 'A' },
+    async () => {
+      state.failNextSync = true; // the sync before already ran; this hits the push after
+      return 'written';
+    },
+    { write: true },
+  );
+  assert.equal(result, 'written');
+});

@@ -78,8 +78,8 @@ Edit `.env`:
 
 | Variable | Set it to | Required? |
 | --- | --- | --- |
-| `ACTUAL_SERVER_URL` | Your Actual server, e.g. `http://localhost:5006` | yes |
-| `ACTUAL_PASSWORD` | The Actual server password from step 1 | yes |
+| `ACTUAL_SERVER_URL` | Your Actual server, e.g. `http://localhost:5006`. Setting it locks the connection | no — the app can connect instead |
+| `ACTUAL_PASSWORD` | The Actual server password from step 1 | with `ACTUAL_SERVER_URL` |
 | `ACTUAL_BUDGET_SYNC_ID` | The sync id from step 1 | no — the app can choose |
 | `IMPORT_TOKEN` | A shared secret the app sends on every request | strongly recommended |
 | `PARSER_MODE` | `regex` (default, fully offline), `ai`, or `both` | no |

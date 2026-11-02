@@ -27,8 +27,8 @@ Edit `backend_app/.env`. The three that matter for a server:
 | Variable | Set it to |
 | --- | --- |
 | `IMPORT_TOKEN` | **A long random secret.** Leave it empty and the server runs with *no authentication* — anything on your LAN can read and write your budget. Generate one with `openssl rand -hex 32`. |
-| `ACTUAL_SERVER_URL` | Your Actual server, e.g. `http://192.168.1.50:5006`. Not `localhost` — see step 4. |
-| `ACTUAL_PASSWORD` | Your Actual server password. |
+| `ACTUAL_SERVER_URL` | *Optional.* Your Actual server, e.g. `http://192.168.1.50:5006`. Not `localhost` — see step 4. Leave it empty to connect from the app instead (Settings → Connection); setting it here locks the connection so the app can't change it. |
+| `ACTUAL_PASSWORD` | Your Actual server password, if you set `ACTUAL_SERVER_URL`. |
 
 `ACTUAL_BUDGET_SYNC_ID` is optional (the app can pick a budget at runtime). Leave `PARSER_MODE=regex`
 unless you want the AI fallback, in which case also set `AI_PROVIDER` and the matching API key.

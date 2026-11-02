@@ -17,6 +17,14 @@ export type ErrorCode =
   | 'BUDGET_NOT_FOUND'
   | 'UNAUTHORIZED'
   | 'AUTH_REQUIRED'
+  | 'ACTUAL_NOT_CONFIGURED'
+  | 'ACTUAL_UNREACHABLE'
+  | 'ACTUAL_AUTH_FAILED'
+  | 'ACTUAL_VERSION_TOO_OLD'
+  | 'CONNECTION_LOCKED'
+  | 'INVALID_FIELD'
+  | 'ACCOUNT_NOT_FOUND'
+  | 'BUDGET_TYPE_UNSUPPORTED'
   | 'TOO_MANY_FILES'
   | 'FILE_TOO_LARGE'
   | 'BATCH_TOO_LARGE'
@@ -151,4 +159,66 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${trim(bytes / 1024)}KB`;
   return `${trim(bytes / (1024 * 1024))}MB`;
+}
+
+/** No Actual server is set up: the backend runs without one (it's optional). */
+export class ActualNotConfiguredError extends ImporterError {
+  constructor() {
+    super(
+      'ACTUAL_NOT_CONFIGURED',
+      'No Actual server is connected. Connect one in the app (Settings → Connection).',
+      409,
+    );
+  }
+}
+
+/** The Actual server didn't answer (wrong URL, server down, network). */
+export class ActualUnreachableError extends ImporterError {
+  constructor(serverUrl: string) {
+    super('ACTUAL_UNREACHABLE', `Could not reach an Actual server at ${serverUrl}.`, 502);
+  }
+}
+
+/** The Actual server answered but refused the password. */
+export class ActualAuthFailedError extends ImporterError {
+  constructor() {
+    super('ACTUAL_AUTH_FAILED', 'The Actual server rejected the password.', 401);
+  }
+}
+
+/**
+ * The server is older than this backend's @actual-app/api. The library
+ * upgrades a budget's file format, so pointing it at an older server could
+ * leave the budget unreadable there (TODO §2).
+ */
+export class ActualVersionTooOldError extends ImporterError {
+  readonly serverVersion: string;
+  constructor(serverVersion: string, minimum: string) {
+    super(
+      'ACTUAL_VERSION_TOO_OLD',
+      `This Actual server runs ${serverVersion}; at least ${minimum} is needed. Update the Actual server first.`,
+      409,
+    );
+    this.serverVersion = serverVersion;
+  }
+}
+
+/** The connection is set in the backend's .env, so the app can't change it. */
+export class ConnectionLockedError extends ImporterError {
+  constructor() {
+    super('CONNECTION_LOCKED', "The Actual server is set in the backend's .env and can't be changed from the app.", 409);
+  }
+}
+
+/** A field is present but its value isn't acceptable. */
+export class InvalidFieldError extends ImporterError {
+  constructor(field: string, reason: string) {
+    super('INVALID_FIELD', `Invalid "${field}": ${reason}`, 400);
+  }
+}
+
+export class AccountNotFoundError extends ImporterError {
+  constructor(accountId: string) {
+    super('ACCOUNT_NOT_FOUND', `No account "${accountId}" in this budget.`, 404);
+  }
 }

@@ -2,7 +2,14 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import { processStatement, PARSER_MODE } from './index';
-import { AuthRequiredError, ImporterError, NoBudgetSelectedError } from './errors';
+import { AuthRequiredError, ConnectionLockedError, ImporterError, NoBudgetSelectedError } from './errors';
+import {
+  defaultConnectionFile,
+  fileConnectionStore,
+  normalizeServerUrl,
+  probeActualServer,
+  resolveConnection,
+} from './actual-connection';
 import { debugFromEnv, initLogFile, logDir, logger, readRecentLogLines } from './logger';
 import { requestLog, requestLogger } from './request-log';
 import { receiveFiles } from './upload';
@@ -36,15 +43,24 @@ const app = express();
 app.use(requestLogger());
 app.use(express.json());
 
-// Server credentials never vary per request, so they're fixed when the
-// budget session is created; only the budget choice is per-request.
-const budgetSession = createBudgetSession(
-  {
-    serverURL: process.env.ACTUAL_SERVER_URL ?? 'http://localhost:5006',
-    password: process.env.ACTUAL_PASSWORD ?? '',
-    dataDir: process.env.ACTUAL_DATA_DIR ?? './actual-cache',
-  },
-  actualSdkAdapter,
+// The Actual server is optional (actual-connection.ts): from .env (locked),
+// from what the app saved, or none. Server credentials don't vary per
+// request; they change only through PUT/DELETE /actual/connection, which
+// reconfigure the session. Only the budget choice is per-request.
+const connectionStore = fileConnectionStore(defaultConnectionFile());
+const initialConnection = resolveConnection(process.env, connectionStore);
+const CONNECTION_LOCKED = initialConnection.locked;
+const ACTUAL_DATA_DIR = process.env.ACTUAL_DATA_DIR || './actual-cache';
+let actualServerUrl: string | null = initialConnection.config?.serverURL ?? null;
+let actualHasPassword = Boolean(initialConnection.config?.password);
+const budgetSession = createBudgetSession(initialConnection.config, actualSdkAdapter, {
+  // Reads reuse the local copy for this long before syncing again; writes
+  // always sync (budget-session.ts).
+  syncIntervalMs: Number(process.env.SYNC_INTERVAL_MS ?? 5000),
+});
+logger.info(
+  { area: 'actual', configured: initialConnection.config !== null, locked: CONNECTION_LOCKED },
+  initialConnection.config ? `Actual server: ${initialConnection.config.serverURL}` : 'No Actual server connected',
 );
 
 const DEFAULT_BUDGET_SYNC_ID = process.env.ACTUAL_BUDGET_SYNC_ID ?? '';
@@ -402,7 +418,70 @@ app.get('/config', (_req: Request, res: Response) => {
     aiProvider: provider?.name,
     aiConfigured: provider ? provider.isConfigured() : false,
     defaultBudgetSyncId: DEFAULT_BUDGET_SYNC_ID || undefined,
+    actual: { configured: budgetSession.isConfigured(), locked: CONNECTION_LOCKED },
   });
+});
+
+// --- Actual connection (optional; see src/actual-connection.ts) ---------
+
+function connectionStatus(serverVersion?: string | null) {
+  return {
+    configured: budgetSession.isConfigured(),
+    locked: CONNECTION_LOCKED,
+    serverUrl: actualServerUrl ?? undefined,
+    hasPassword: actualHasPassword,
+    ...(serverVersion ? { serverVersion } : {}),
+  };
+}
+
+/** Changing where the backend sends budget data needs a token and an unlocked connection. */
+function assertConnectionEditable() {
+  if (!IMPORT_TOKEN) throw new AuthRequiredError();
+  if (CONNECTION_LOCKED) throw new ConnectionLockedError();
+}
+
+app.get('/actual/connection', (_req: Request, res: Response) => {
+  res.json(connectionStatus());
+});
+
+/**
+ * Tests the server (reachable, recent enough, password accepted) and only
+ * then saves it and points the session at it. No restart needed.
+ */
+app.put('/actual/connection', async (req: Request, res: Response) => {
+  try {
+    assertConnectionEditable();
+    const serverUrl = normalizeServerUrl(req.body?.serverUrl);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const { version } = await probeActualServer(serverUrl, password);
+    connectionStore.write({ serverUrl, password });
+    await budgetSession.reconfigure({ serverURL: serverUrl, password, dataDir: ACTUAL_DATA_DIR });
+    actualServerUrl = serverUrl;
+    actualHasPassword = password !== '';
+    requestLog(res).info({ serverUrl, serverVersion: version }, 'Actual server connected');
+    return res.json(connectionStatus(version));
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while connecting to Actual.');
+  }
+});
+
+/**
+ * Disconnects: the backend keeps running without Actual. The downloaded
+ * budget cache in ACTUAL_DATA_DIR is left in place (the next connection
+ * re-downloads what it needs anyway).
+ */
+app.delete('/actual/connection', async (_req: Request, res: Response) => {
+  try {
+    assertConnectionEditable();
+    connectionStore.clear();
+    await budgetSession.reconfigure(null);
+    actualServerUrl = null;
+    actualHasPassword = false;
+    requestLog(res).info('Actual server disconnected');
+    return res.json(connectionStatus());
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while disconnecting from Actual.');
+  }
 });
 
 // --- Category memory (see src/categorydb.ts) ---------------------------

@@ -108,7 +108,11 @@ export async function importToActual(
     };
   });
 
-  const result = await session.withBudget(budget, (actual) => actual.importTransactions(accountId, payload));
+  const result = await session.withBudget(
+    budget,
+    (actual) => actual.importTransactions(accountId, payload),
+    { write: true },
+  );
   return {
     added: result.added?.length ?? 0,
     updated: result.updated?.length ?? 0,
@@ -190,7 +194,7 @@ export async function undoImport(
       });
     }
     return { removed: ours.length, skipped: wanted.size - ours.length, softDeleted };
-  });
+  }, { write: true });
 }
 
 /**

@@ -1,5 +1,6 @@
 import type * as actualApi from '@actual-app/api';
 import type { Logger } from 'pino';
+import { ActualNotConfiguredError } from './errors';
 import { logger } from './logger';
 
 /**
@@ -16,6 +17,10 @@ import { logger } from './logger';
  *
  * Do not call withBudget()/withServer() from inside a callback — turns are
  * serialized, so the nested call would wait for its own parent forever.
+ *
+ * The Actual connection is optional: a session can be created with no
+ * server config (every turn then fails with ACTUAL_NOT_CONFIGURED before
+ * touching the SDK) and be pointed at a server later with reconfigure().
  */
 
 export interface ServerConfig {
@@ -46,6 +51,8 @@ export type ActualPort = Pick<
   | 'getTransactions'
   | 'importTransactions'
   | 'updateTransaction'
+  | 'getBudgetMonth'
+  | 'getBudgetMonths'
 >;
 
 /**
@@ -62,21 +69,55 @@ export interface ActualAdapter {
   readonly port: ActualPort;
 }
 
+export interface TurnOptions {
+  /**
+   * The turn changes the budget. Write turns skip the sync throttle (they
+   * always start from the server's latest state, so dedupe sees everything)
+   * and push the change to the server as soon as the callback is done.
+   */
+  write?: boolean;
+}
+
 export interface BudgetSession {
   /** Runs `fn` with `budget` loaded, exclusively. */
-  withBudget<T>(budget: BudgetRef, fn: (port: ActualPort) => Promise<T>): Promise<T>;
+  withBudget<T>(budget: BudgetRef, fn: (port: ActualPort) => Promise<T>, options?: TurnOptions): Promise<T>;
   /** Runs `fn` with only the server connection open (no budget download). */
   withServer<T>(fn: (port: ActualPort) => Promise<T>): Promise<T>;
+  /**
+   * Points the session at another server, or at none (`null`). Queued like
+   * a turn, so in-flight work finishes first; the old connection is closed
+   * and no budget counts as loaded afterwards.
+   */
+  reconfigure(config: ServerConfig | null): Promise<void>;
+  /** Whether a server is configured (it may still be unreachable). */
+  isConfigured(): boolean;
   shutdown(): Promise<void>;
 }
 
+export interface SessionOptions {
+  log?: Logger;
+  /**
+   * A loaded budget is synced with the server at most this often (ms);
+   * read turns in between use the local copy as it is. 0 = before every
+   * turn. Write turns always sync.
+   */
+  syncIntervalMs?: number;
+  now?: () => number;
+}
+
 export function createBudgetSession(
-  serverConfig: ServerConfig,
+  initialConfig: ServerConfig | null,
   adapter: ActualAdapter,
-  log: Logger = logger.child({ area: 'session' }),
+  options: SessionOptions = {},
 ): BudgetSession {
+  const log = options.log ?? logger.child({ area: 'session' });
+  const syncIntervalMs = options.syncIntervalMs ?? 0;
+  const now = options.now ?? Date.now;
+
+  let config = initialConfig;
   let serverReady = false;
   let loadedSyncId: string | null = null;
+  let lastSyncAt = -Infinity;
   let tail: Promise<void> = Promise.resolve();
 
   function turn<T>(work: () => Promise<T>): Promise<T> {
@@ -90,15 +131,40 @@ export function createBudgetSession(
     return run;
   }
 
+  async function closeConnection(): Promise<void> {
+    if (!serverReady) return;
+    try {
+      await adapter.shutdown();
+      log.info('Closed the Actual connection');
+    } finally {
+      serverReady = false;
+      loadedSyncId = null;
+      lastSyncAt = -Infinity;
+    }
+  }
+
+  async function syncLoaded(budgetSyncId: string): Promise<void> {
+    try {
+      await adapter.sync();
+      lastSyncAt = now();
+    } catch (err) {
+      // A failed sync leaves the copy's state unknown: re-download next time.
+      loadedSyncId = null;
+      log.error({ budgetSyncId, err }, 'Sync with Actual failed');
+      throw err;
+    }
+  }
+
   /** One turn: server connection open, `budget` loaded if given, then `fn`. */
-  function run<T>(budget: BudgetRef | undefined, fn: (port: ActualPort) => Promise<T>): Promise<T> {
-    const queuedAt = Date.now();
+  function run<T>(budget: BudgetRef | undefined, fn: (port: ActualPort) => Promise<T>, opts: TurnOptions = {}): Promise<T> {
+    const queuedAt = now();
     return turn(async () => {
-      const startedAt = Date.now();
+      if (!config) throw new ActualNotConfiguredError();
+      const startedAt = now();
       const budgetSyncId = budget?.syncId;
-      let action: 'none' | 'download' | 'sync' = 'none';
+      let action: 'none' | 'download' | 'sync' | 'cached' = 'none';
       if (!serverReady) {
-        await adapter.init(serverConfig);
+        await adapter.init(config);
         serverReady = true;
         log.info('Connected to the Actual server');
       }
@@ -109,27 +175,33 @@ export function createBudgetSession(
         loadedSyncId = null;
         await adapter.downloadBudget(budget);
         loadedSyncId = budget.syncId;
-        log.info({ budgetSyncId, ms: Date.now() - startedAt }, 'Budget downloaded');
+        lastSyncAt = now();
+        log.info({ budgetSyncId, ms: now() - startedAt }, 'Budget downloaded');
       } else if (budget) {
-        // Already loaded, but possibly from long ago: without this, accounts
-        // or transactions added in Actual since then stay invisible until a
-        // restart, and import dedupe checks against stale data. A failed
-        // sync leaves the copy's state unknown, so re-download next time.
-        action = 'sync';
-        try {
-          await adapter.sync();
-        } catch (err) {
-          loadedSyncId = null;
-          log.error({ budgetSyncId, err }, 'Sync with Actual failed');
-          throw err;
+        // Already loaded, but possibly from long ago: without a sync,
+        // accounts or transactions added in Actual since then stay invisible
+        // and import dedupe checks against stale data. Reads within
+        // syncIntervalMs of the last sync reuse the local copy.
+        if (opts.write || now() - lastSyncAt >= syncIntervalMs) {
+          action = 'sync';
+          await syncLoaded(budget.syncId);
+        } else {
+          action = 'cached';
         }
       }
-      const prepMs = Date.now() - startedAt;
+      const prepMs = now() - startedAt;
       try {
-        return await fn(adapter.port);
+        const result = await fn(adapter.port);
+        if (budget && opts.write) {
+          // Push the change now rather than waiting for the next turn. The
+          // change is already in the local copy, so a failure here is not
+          // the write failing: the next sync retries it.
+          await syncLoaded(budget.syncId).catch(() => undefined);
+        }
+        return result;
       } finally {
         log.debug(
-          { budgetSyncId, action, waitMs: startedAt - queuedAt, prepMs, runMs: Date.now() - startedAt - prepMs },
+          { budgetSyncId, action, write: Boolean(opts.write), waitMs: startedAt - queuedAt, prepMs, runMs: now() - startedAt - prepMs },
           'Turn finished',
         );
       }
@@ -138,20 +210,20 @@ export function createBudgetSession(
 
   return {
     withServer: (fn) => run(undefined, fn),
-    withBudget: run,
+    withBudget: (budget, fn, opts) => run(budget, fn, opts),
+    isConfigured: () => config !== null,
+
+    reconfigure(next) {
+      return turn(async () => {
+        await closeConnection();
+        config = next;
+        log.info({ configured: next !== null }, next ? 'Actual server changed' : 'Actual server removed');
+      });
+    },
 
     /** Queued like any turn, so it never kills a running import halfway. */
     shutdown() {
-      return turn(async () => {
-        if (!serverReady) return;
-        try {
-          await adapter.shutdown();
-          log.info('Closed the Actual connection');
-        } finally {
-          serverReady = false;
-          loadedSyncId = null;
-        }
-      });
+      return turn(closeConnection);
     },
   };
 }
