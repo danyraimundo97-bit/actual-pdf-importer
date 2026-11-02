@@ -56,6 +56,7 @@ export const actualSdkAdapter: ActualAdapter = {
     getPayees: actualApi.getPayees,
     getTransactions: actualApi.getTransactions,
     importTransactions: actualApi.importTransactions,
+    addTransactions: actualApi.addTransactions,
     updateTransaction: actualApi.updateTransaction,
     getBudgetMonth: actualApi.getBudgetMonth,
     getBudgetMonths: actualApi.getBudgetMonths,

@@ -27,6 +27,9 @@ import {
 } from './actual';
 import { actualSdkAdapter, isHandledSdkError } from './actual-adapter';
 import { getDashboard } from './dashboard';
+import { addManualTransaction, getQuickAddOptions, parseManualTransaction } from './transactions';
+import { getAccountPage, parseLimit } from './account-page';
+import { getBudgetMonth, parseMonth } from './budget-month';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import {
   clearCategoryMappings,
@@ -407,6 +410,63 @@ app.get('/dashboard', async (req: Request, res: Response) => {
     res.json(dashboard);
   } catch (err) {
     sendImporterError(res, err, 'Internal error while building the dashboard.');
+  }
+});
+
+// --- Everyday app screens (one call per screen) --------------------------
+
+/**
+ * Quick add: one transaction typed in the app. Safe to retry with the same
+ * clientId (see transactions.ts). Teaches the category memory too, so the
+ * payee is pre-categorized next time, in a statement or here.
+ */
+app.post('/transactions', async (req: Request, res: Response) => {
+  try {
+    const input = parseManualTransaction(req.body);
+    const budget = resolveBudgetRef(req.body?.budgetSyncId, req.body?.budgetPassword);
+    const result = await addManualTransaction(budgetSession, budget, input);
+    if (input.payeeName && input.categoryId) {
+      rememberCategory(input.payeeName, input.categoryId, undefined, budget.syncId);
+    }
+    requestLog(res).info(
+      { accountId: input.accountId, id: result.id, created: result.created, categorized: Boolean(input.categoryId) },
+      result.created ? 'Transaction added' : 'Transaction already added (retry)',
+    );
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while adding the transaction.');
+  }
+});
+
+app.get('/quick-add/options', async (req: Request, res: Response) => {
+  try {
+    res.json(await getQuickAddOptions(budgetSession, resolveBudgetRef(req.query.budgetSyncId)));
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while loading the quick-add options.');
+  }
+});
+
+/** One account's balance and transactions, newest first; `before` = the previous page's nextCursor. */
+app.get('/accounts/:id/transactions', async (req: Request, res: Response) => {
+  try {
+    const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : undefined;
+    const page = await getAccountPage(budgetSession, resolveBudgetRef(req.query.budgetSyncId), req.params.id, {
+      before,
+      limit: parseLimit(req.query.limit),
+    });
+    res.json(page);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while loading the account.');
+  }
+});
+
+/** This month's budget (or `month=YYYY-MM`): budgeted, spent and left per category. */
+app.get('/budget-month', async (req: Request, res: Response) => {
+  try {
+    const month = parseMonth(req.query.month);
+    res.json(await getBudgetMonth(budgetSession, resolveBudgetRef(req.query.budgetSyncId), month));
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while loading the budget.');
   }
 });
 

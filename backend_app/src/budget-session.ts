@@ -50,6 +50,7 @@ export type ActualPort = Pick<
   | 'getPayees'
   | 'getTransactions'
   | 'importTransactions'
+  | 'addTransactions'
   | 'updateTransaction'
   | 'getBudgetMonth'
   | 'getBudgetMonths'
