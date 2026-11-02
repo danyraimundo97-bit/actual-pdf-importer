@@ -2,7 +2,13 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import { processStatement, PARSER_MODE } from './index';
-import { AuthRequiredError, ConnectionLockedError, ImporterError, NoBudgetSelectedError } from './errors';
+import {
+  AuthRequiredError,
+  ConnectionLockedError,
+  ImporterError,
+  InvalidFieldError,
+  NoBudgetSelectedError,
+} from './errors';
 import {
   defaultConnectionFile,
   fileConnectionStore,
@@ -18,6 +24,7 @@ import { parseStatements, summarize } from './statement-batch';
 import { getAiProvider } from './parsers/ai-providers';
 import {
   assignImportedIds,
+  ensureCategory,
   importToActual,
   undoImport,
   learnCategoriesFromActual,
@@ -388,6 +395,36 @@ app.get('/actual/categories', async (req: Request, res: Response) => {
     res.json({ groups });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while listing Actual categories.');
+  }
+});
+
+/**
+ * Makes sure a category exists in Actual (the app's "Match your categories"
+ * → "Create in Actual"). Idempotent by name; see ensureCategory.
+ */
+app.post('/actual/categories', async (req: Request, res: Response) => {
+  const { budgetSyncId, budgetPassword, groupName, name, isIncome } = req.body ?? {};
+  for (const [field, value] of [
+    ['name', name],
+    ['groupName', groupName],
+  ] as const) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return sendImporterError(res, new InvalidFieldError(field, 'must be a non-empty string'), '');
+    }
+    if (value.trim().length > 100) {
+      return sendImporterError(res, new InvalidFieldError(field, 'must be at most 100 characters'), '');
+    }
+  }
+  try {
+    const result = await ensureCategory(budgetSession, resolveBudgetRef(budgetSyncId, budgetPassword), {
+      groupName,
+      name,
+      isIncome: isIncome === true,
+    });
+    logger.info({ categoryId: result.id, created: result.created }, 'Category ensured in Actual');
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while creating an Actual category.');
   }
 });
 

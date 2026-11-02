@@ -12,6 +12,8 @@ import 'package:mobile_app/core/errors/api_exception.dart';
 import 'package:mobile_app/data/api/categories_api.dart';
 import 'package:mobile_app/data/api/importer_api.dart';
 import 'package:mobile_app/data/local/db/app_database.dart';
+import 'package:mobile_app/data/local/db/local_category_store.dart';
+import 'package:mobile_app/data/models/actual_category.dart';
 import 'package:mobile_app/data/models/category_mapping.dart';
 import 'package:mobile_app/data/models/import_result.dart';
 import 'package:mobile_app/data/models/parse_result.dart';
@@ -43,6 +45,11 @@ class _FakeImporterApi implements ImporterApi {
     }
     return const ParseResult(bankId: 'moey', transactions: []);
   }
+
+  @override
+  Future<List<ActualCategoryGroup>> getActualCategories({String? budgetSyncId}) async => const [
+    ActualCategoryGroup(id: 'g', name: 'Everyday', categories: [ActualCategory(id: 'a-cafes', name: 'Cafés')]),
+  ];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -260,6 +267,27 @@ void main() {
       expect(first.suggestedCategoryName, 'Groceries');
       expect(first.suggestedFromHint, isFalse);
       expect(only().parseResult!.localCategories, isTrue);
+    });
+
+    test("with Actual connected, the phone's memory fills gaps through linked categories", () async {
+      await start(backendUrl: 'http://backend', actual: true);
+      final store = device.read(localCategoryStoreProvider);
+      // The second movement's payee, remembered offline; its category is
+      // linked to an Actual one. The first gets the backend's mapping.
+      final expected = jsonDecode(File('../fixtures/parsers/moey-basic.expected.json').readAsStringSync());
+      final second = (expected['transactions'] as List)[1]['payee'] as String;
+      await store.remember(second, 'preset:food.restaurants', budgetSyncId: 'budget-1');
+      await store.link('preset:food.restaurants', 'budget-1', 'a-cafes');
+
+      deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      final txs = only().parseResult!.transactions;
+      expect(txs[0].suggestedCategoryId, 'cat-1', reason: "the backend's memory comes first");
+      expect(txs[1].suggestedCategoryId, 'a-cafes');
+      expect(txs[1].suggestedCategoryName, 'Cafés');
+      expect(txs.every((t) => !LocalCategoryStore.isLocalId(t.suggestedCategoryId ?? '')), isTrue);
+      expect(only().parseResult!.localCategories, isFalse);
     });
 
     test('an unreachable backend still gives a reviewable statement', () async {

@@ -251,6 +251,73 @@ export async function listCategoryGroups(session: BudgetSession, budget: BudgetR
     .map((g) => ({ ...g, categories: g.categories.filter((c: { hidden?: boolean }) => !c.hidden) }));
 }
 
+export interface EnsureCategoryInput {
+  groupName: string;
+  name: string;
+  /** An income category goes into the budget's income group. */
+  isIncome?: boolean;
+}
+
+/** Case-, accent- and spacing-insensitive, for matching names. */
+export function categoryNameKey(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * POST /actual/categories: makes sure a category exists in the budget, for
+ * the app's "Match your categories" ("create it in Actual").
+ *
+ * Idempotent by name: a category with the same name (see categoryNameKey)
+ * anywhere in the budget is returned instead of creating another, so a retry
+ * after a lost response never duplicates. Its group is reused the same way,
+ * and created only when missing. Income categories go into the budget's
+ * existing income group: Actual budgets have exactly one.
+ */
+export async function ensureCategory(
+  session: BudgetSession,
+  budget: BudgetRef,
+  input: EnsureCategoryInput,
+): Promise<{ id: string; created: boolean }> {
+  const name = input.name.trim();
+  const groupName = input.groupName.trim();
+  return session.withBudget(
+    budget,
+    async (actual) => {
+      // Typed by hand: see listCategoryGroups.
+      const groups = (await actual.getCategoryGroups()) as Array<{
+        id: string;
+        name: string;
+        is_income?: boolean;
+        categories?: Array<{ id: string; name: string }>;
+      }>;
+      const key = categoryNameKey(name);
+      for (const g of groups) {
+        const existing = g.categories?.find((c) => categoryNameKey(c.name) === key);
+        if (existing) return { id: existing.id, created: false };
+      }
+
+      const group = input.isIncome
+        ? groups.find((g) => g.is_income)
+        : groups.find((g) => !g.is_income && categoryNameKey(g.name) === categoryNameKey(groupName));
+      const groupId =
+        group?.id ?? (await actual.createCategoryGroup({ name: groupName, is_income: Boolean(input.isIncome), hidden: false }));
+      const id = await actual.createCategory({
+        name,
+        group_id: groupId,
+        is_income: Boolean(input.isIncome),
+        hidden: false,
+      });
+      return { id, created: true };
+    },
+    { write: true },
+  );
+}
+
 /**
  * GET /budgets. Only needs the server connection, not any particular
  * budget downloaded — uses withServer so listing budgets doesn't force-

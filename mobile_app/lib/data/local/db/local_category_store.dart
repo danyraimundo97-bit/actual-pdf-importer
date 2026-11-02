@@ -149,6 +149,38 @@ class LocalCategoryStore {
         .write(PayeeCategoriesCompanion(deleted: const Value(true), updatedAt: Value(_at)));
   }
 
+  // --- Links to Actual ("Match your categories", Phase 4c) --------------
+
+  /// Local category id → Actual category id, for one budget.
+  Future<Map<String, String>> links(String budgetSyncId) async {
+    final rows = await (_db.select(_db.categoryLinks)..where((l) => l.budgetSyncId.equals(budgetSyncId))).get();
+    return {for (final r in rows) r.categoryId: r.actualCategoryId};
+  }
+
+  Future<void> link(String categoryId, String budgetSyncId, String actualCategoryId) => _db
+      .into(_db.categoryLinks)
+      .insertOnConflictUpdate(
+        CategoryLinksCompanion.insert(
+          categoryId: categoryId,
+          budgetSyncId: budgetSyncId,
+          actualCategoryId: actualCategoryId,
+        ),
+      );
+
+  /// Ids of the categories the memory points to, in this budget's scope or
+  /// the unscoped one: the ones worth matching.
+  Future<Set<String>> categoriesInUse({String? budgetSyncId}) async {
+    final rows =
+        await (_db.selectOnly(_db.payeeCategories, distinct: true)
+              ..addColumns([_db.payeeCategories.categoryId])
+              ..where(
+                _db.payeeCategories.deleted.equals(false) &
+                    _db.payeeCategories.budgetSyncId.isIn({budgetSyncId ?? '', ''}),
+              ))
+            .get();
+    return {for (final r in rows) r.read(_db.payeeCategories.categoryId)!};
+  }
+
   // --- Managing the categories themselves (Settings → Categories) -------
 
   /// Every group and category, hidden ones included, in order.

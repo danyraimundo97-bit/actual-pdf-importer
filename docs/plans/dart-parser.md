@@ -343,6 +343,27 @@ repopulate.
   ids are `local:<uuid v4>`.
 - Not done: reordering (the `sort` column is there; the screen has no drag handles yet).
 
+### Phase 4c as built (2026-11-02)
+
+- Backend: `POST /actual/categories` `{ budgetSyncId, groupName, name, isIncome? }` →
+  `{ id, created }` (201 when created). `ensureCategory` (`actual.ts`) reuses a category with the
+  same name anywhere in the budget (`categoryNameKey`: case, accents, spacing), then a group with
+  that name, and creates only what's missing; an income category goes into the budget's income
+  group. `createCategoryGroup`/`createCategory` added to `ActualPort`.
+- App: `/match-categories` ("Match your categories"). Every visible local category whose name
+  matches exactly one Actual category is linked automatically, unused presets included (hints
+  point at presets). Local categories the memory uses get a row: create in Actual (default), pick
+  an Actual category, or skip (remembered per budget in `SettingsStore`). Links are saved as they
+  succeed, so a failure half-way keeps them.
+- Where it shows: a note with "Match your categories" on the Import tab while
+  `pendingCategoryMatchesProvider` > 0 (Actual ready, local categories in use that are unlinked
+  and not skipped; so it comes back when new ones appear), and "Match with Actual" in Settings.
+  Not pushed as a modal after choosing a budget.
+- Using the links: with Actual connected, the inbox fills lines the backend's memory doesn't know
+  from the phone's memory or hints when their category is linked (`toActualCategories`); Review
+  maps a statement read before connecting the same way once Actual's categories load. Unlinked
+  local suggestions are still dropped on import.
+
 ## Phase 5 — App integration
 
 In `features/import/inbox_controller.dart`, per queued PDF:

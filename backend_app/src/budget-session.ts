@@ -47,6 +47,8 @@ export type ActualPort = Pick<
   | 'getAccounts'
   | 'getCategories'
   | 'getCategoryGroups'
+  | 'createCategoryGroup'
+  | 'createCategory'
   | 'getPayees'
   | 'getTransactions'
   | 'importTransactions'

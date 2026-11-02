@@ -15,6 +15,7 @@ import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/inline_note.dart';
+import '../../categories/category_matching.dart';
 import '../csv_export.dart';
 import '../widgets/import_result_sheet.dart';
 import '../widgets/transaction_edit_sheet.dart';
@@ -44,8 +45,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     super.initState();
     final parsed = widget.args.parseResult;
     // Read while Actual wasn't connected: those suggestions are the app's own
-    // categories, which Actual doesn't know (until "Match your categories",
-    // Phase 4c). Importing them would send ids Actual can't resolve.
+    // categories, which Actual can't resolve. They're held back here and come
+    // back as their linked Actual category once Actual's categories load
+    // ("Match your categories"); unlinked ones stay off.
     _transactions = widget.args.account != null && parsed.localCategories
         ? [for (final t in parsed.transactions) t.withoutSuggestion()]
         : List.of(parsed.transactions);
@@ -63,11 +65,37 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       final groups = await ref
           .read(importerApiProvider)
           .getActualCategories(budgetSyncId: widget.args.budgetSyncId);
-      if (mounted) setState(() => _categoryGroups = groups);
+      final linked = await _linkedSuggestions(groups);
+      if (!mounted) return;
+      setState(() {
+        _categoryGroups = groups;
+        for (final (i, t) in linked.indexed) {
+          final current = _transactions[i];
+          if (t.suggestedCategoryId == null || current.suggestedCategoryId != null) continue;
+          if (current.overrideCategoryId != null) continue;
+          _transactions[i] = current.copyWith(
+            suggestedCategoryId: t.suggestedCategoryId,
+            suggestedCategoryName: t.suggestedCategoryName,
+            suggestedFromHint: t.suggestedFromHint,
+          );
+        }
+      });
     } on ApiException {
       // The review screen still works without categories loaded — the
       // category picker just won't have anything to offer yet.
     }
+  }
+
+  /// The statement's local suggestions as their linked Actual categories,
+  /// line by line (empty when there's nothing to map).
+  Future<List<ParsedTransaction>> _linkedSuggestions(List<ActualCategoryGroup> groups) async {
+    final parsed = widget.args.parseResult;
+    final budgetSyncId = widget.args.budgetSyncId;
+    if (!parsed.localCategories || budgetSyncId == null) return const [];
+    final links = await ref.read(localCategoryStoreProvider).links(budgetSyncId);
+    if (links.isEmpty) return const [];
+    final names = actualCategoryNames(groups);
+    return [for (final t in parsed.transactions) toActualCategories(t, links: links, actualNames: names)];
   }
 
   int get _includedCount => _transactions.where((t) => t.include).length;

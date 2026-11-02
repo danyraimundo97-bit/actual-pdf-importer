@@ -10,6 +10,7 @@ class SettingsStore {
   static const _kOnboarded = 'onboarded';
   static const _kDebugLogging = 'debug_logging';
   static const _kParseOnDevice = 'parse_on_device';
+  static const _kSkippedMatchesPrefix = 'category_match_skipped:';
 
   final SharedPreferences _prefs;
 
@@ -42,6 +43,13 @@ class SettingsStore {
   /// changed before the app's parsers caught up.
   bool get parseOnDevice => _prefs.getBool(_kParseOnDevice) ?? true;
   Future<void> setParseOnDevice(bool value) => _prefs.setBool(_kParseOnDevice, value);
+
+  /// Local categories the user chose not to match to [budgetSyncId]'s
+  /// Actual categories, so "Match your categories" stops asking about them.
+  Set<String> skippedCategoryMatches(String budgetSyncId) =>
+      (_prefs.getStringList('$_kSkippedMatchesPrefix$budgetSyncId') ?? const []).toSet();
+  Future<void> setSkippedCategoryMatches(String budgetSyncId, Set<String> ids) =>
+      _prefs.setStringList('$_kSkippedMatchesPrefix$budgetSyncId', ids.toList()..sort());
 
   Future<void> clear() => _prefs.clear();
 }

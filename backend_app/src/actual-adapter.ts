@@ -53,6 +53,8 @@ export const actualSdkAdapter: ActualAdapter = {
     getAccounts: actualApi.getAccounts,
     getCategories: actualApi.getCategories,
     getCategoryGroups: actualApi.getCategoryGroups,
+    createCategoryGroup: actualApi.createCategoryGroup,
+    createCategory: actualApi.createCategory,
     getPayees: actualApi.getPayees,
     getTransactions: actualApi.getTransactions,
     importTransactions: actualApi.importTransactions,

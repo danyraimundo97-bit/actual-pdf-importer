@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createBudgetSession } from '../budget-session';
 import {
   assignImportedIds,
+  ensureCategory,
   importToActual,
   listAccounts,
   listBudgets,
@@ -244,4 +245,63 @@ test('importToActual sends a distinct imported_id per repeated movement', async 
   );
 
   assert.deepEqual(calls[0].payload.map((p) => p.imported_id), [GOLDEN_FIRST, GOLDEN_SECOND, 'pdfimport--779377659']);
+});
+
+// --- ensureCategory (POST /actual/categories) ------------------------------
+
+function categoryFake(groups: Array<{ id: string; name: string; is_income?: boolean; categories?: Array<{ id: string; name: string }> }>) {
+  const created: { groups: unknown[]; categories: unknown[] } = { groups: [], categories: [] };
+  const fake = makeFakeAdapter({
+    getCategoryGroups: (async () => groups),
+    createCategoryGroup: (async (group: { name: string }) => {
+      created.groups.push(group);
+      return `new-group-${created.groups.length}`;
+    }),
+    createCategory: (async (category: unknown) => {
+      created.categories.push(category);
+      return `new-cat-${created.categories.length}`;
+    }),
+  });
+  return { session: createBudgetSession(SERVER, fake.adapter), created };
+}
+
+test('ensureCategory returns an existing category by name, ignoring case and accents', async () => {
+  const { session, created } = categoryFake([
+    { id: 'g1', name: 'Food', categories: [{ id: 'c1', name: 'Restaurants & Cafes' }] },
+  ]);
+
+  const result = await ensureCategory(session, { syncId: 'b' }, { groupName: 'Other', name: ' restaurants &  cafés ' });
+
+  assert.deepEqual(result, { id: 'c1', created: false });
+  assert.deepEqual(created, { groups: [], categories: [] });
+});
+
+test('ensureCategory creates the category in an existing group with that name', async () => {
+  const { session, created } = categoryFake([{ id: 'g1', name: 'food', categories: [] }]);
+
+  const result = await ensureCategory(session, { syncId: 'b' }, { groupName: 'Food', name: 'Groceries' });
+
+  assert.deepEqual(result, { id: 'new-cat-1', created: true });
+  assert.deepEqual(created.groups, []);
+  assert.deepEqual(created.categories, [{ name: 'Groceries', group_id: 'g1', is_income: false, hidden: false }]);
+});
+
+test('ensureCategory creates a missing group first', async () => {
+  const { session, created } = categoryFake([]);
+
+  await ensureCategory(session, { syncId: 'b' }, { groupName: 'Transport', name: 'Fuel' });
+
+  assert.deepEqual(created.groups, [{ name: 'Transport', is_income: false, hidden: false }]);
+  assert.deepEqual(created.categories, [{ name: 'Fuel', group_id: 'new-group-1', is_income: false, hidden: false }]);
+});
+
+test('ensureCategory puts an income category in the budget\'s income group', async () => {
+  const { session, created } = categoryFake([
+    { id: 'g1', name: 'Income', is_income: true, categories: [{ id: 'c1', name: 'Salary' }] },
+  ]);
+
+  await ensureCategory(session, { syncId: 'b' }, { groupName: 'Earnings', name: 'Refunds', isIncome: true });
+
+  assert.deepEqual(created.groups, []);
+  assert.deepEqual(created.categories, [{ name: 'Refunds', group_id: 'g1', is_income: true, hidden: false }]);
 });

@@ -9,6 +9,7 @@ import '../features/accounts/screens/account_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
 import '../features/categories/screens/categories_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
+import '../features/categories/screens/match_categories_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/dev/dev_screen.dart';
 import '../features/diagnostics/diagnostics_screen.dart';
@@ -58,6 +59,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/review',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => ReviewScreen(args: state.extra as ReviewScreenArgs),
+      ),
+      GoRoute(
+        path: '/match-categories',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const MatchCategoriesScreen(),
       ),
       GoRoute(
         path: '/add',

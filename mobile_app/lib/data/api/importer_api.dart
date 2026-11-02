@@ -86,6 +86,24 @@ class ImporterApi {
     return list.map(ActualCategoryGroup.fromJson).toList();
   }
 
+  /// POST /actual/categories: makes sure a category exists in Actual and
+  /// returns its id. Idempotent by name on the backend, so retrying never
+  /// creates a duplicate.
+  Future<String> ensureActualCategory({
+    required String budgetSyncId,
+    required String groupName,
+    required String name,
+    bool isIncome = false,
+  }) async {
+    final res = await _guarded(
+      () => _dio.post(
+        '/actual/categories',
+        data: {'budgetSyncId': budgetSyncId, 'groupName': groupName, 'name': name, 'isIncome': isIncome},
+      ),
+    );
+    return (res.data as Map<String, dynamic>)['id'] as String;
+  }
+
   /// GET /dashboard: aggregated metrics for one budget (see the backend's
   /// src/dashboard.ts for what each number includes).
   Future<Dashboard> getDashboard({String? budgetSyncId, int months = 6}) async {

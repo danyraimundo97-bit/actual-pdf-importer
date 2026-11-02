@@ -13,6 +13,7 @@ import '../../data/models/parse_result.dart';
 import '../../data/models/parsed_transaction.dart';
 import '../../data/pdf/pdf_text_extractor.dart';
 import '../../data/providers.dart';
+import '../categories/category_matching.dart';
 
 /// The backend rejects statements above this size; checking locally gives
 /// an immediate, specific error instead of a failed upload.
@@ -300,7 +301,8 @@ class InboxController extends Notifier<List<InboxItem>> {
         final scoped = await api.list(budgetSyncId: budgetSyncId);
         // GET /categories without a budget is the unscoped bucket.
         final unscoped = budgetSyncId == null ? const <Never>[] : await api.list();
-        return (applyCategoryMemory(transactions, scoped: scoped, unscoped: unscoped), false);
+        final fromBackend = applyCategoryMemory(transactions, scoped: scoped, unscoped: unscoped);
+        return (await _fillFromPhone(fromBackend, budgetSyncId!), false);
       } on ApiException catch (e) {
         _log.warn("Category memory unavailable; using the phone's", {'code': e.code, 'status': e.statusCode});
       }
@@ -320,6 +322,44 @@ class InboxController extends Notifier<List<InboxItem>> {
       ],
       true,
     );
+  }
+
+  /// With Actual connected, lines the backend's memory doesn't know can still
+  /// get a category from the phone's memory or a hint, when that local
+  /// category is linked to an Actual one ("Match your categories"). Unlinked
+  /// ones stay uncategorised: Actual can't resolve the app's ids.
+  Future<List<ParsedTransaction>> _fillFromPhone(List<ParsedTransaction> transactions, String budgetSyncId) async {
+    if (transactions.every((t) => t.suggestedCategoryId != null)) return transactions;
+    final store = ref.read(localCategoryStoreProvider);
+    final links = await store.links(budgetSyncId);
+    if (links.isEmpty) return transactions;
+    final Map<String, String> names;
+    try {
+      names = actualCategoryNames(
+        await ref.read(importerApiProvider).getActualCategories(budgetSyncId: budgetSyncId),
+      );
+    } on ApiException catch (e) {
+      _log.warn('Actual categories unavailable; no suggestions from the phone', {'code': e.code});
+      return transactions;
+    }
+    return [
+      for (final t in transactions)
+        if (t.suggestedCategoryId != null)
+          t
+        else
+          switch (await store.suggest(t.payee, budgetSyncId: budgetSyncId)) {
+            final s? => toActualCategories(
+              t.copyWith(
+                suggestedCategoryId: s.categoryId,
+                suggestedCategoryName: s.categoryName,
+                suggestedFromHint: s.source == SuggestionSource.hint,
+              ),
+              links: links,
+              actualNames: names,
+            ),
+            null => t,
+          },
+    ];
   }
 
   /// Whether Actual is connected with a budget chosen. A backend that

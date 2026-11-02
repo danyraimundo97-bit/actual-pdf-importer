@@ -181,6 +181,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 icon: const Icon(Icons.category_outlined, size: 18),
                 label: const Text('Edit categories'),
               ),
+              if (ref.watch(linkStateProvider).valueOrNull == LinkState.ready)
+                OutlinedButton.icon(
+                  onPressed: () => context.push('/match-categories'),
+                  icon: const Icon(Icons.link_rounded, size: 18),
+                  label: const Text('Match with Actual'),
+                ),
             ],
           ),
           const SizedBox(height: Space.xxl + Space.sm),

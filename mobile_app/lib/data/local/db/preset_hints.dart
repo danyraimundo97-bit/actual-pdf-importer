@@ -3,6 +3,8 @@
 /// Shown with a "hint" badge; accepting one records a real mapping.
 library;
 
+import '../../../core/format/fold.dart';
+
 /// Merchant names (whole words) → a preset category key. Checked in
 /// order, so a more specific name goes before a shorter one that it
 /// contains (GALP ENERGIA before GALP).
@@ -26,20 +28,9 @@ final _patterns = [
 /// The preset key a payee hints at, or null. Case- and accent-insensitive
 /// ("Farmácia" matches FARMACIA).
 String? hintPresetKey(String payee) {
-  final text = _foldAccents(payee.toUpperCase());
+  final text = foldAccents(payee.toUpperCase());
   for (final (pattern, key) in _patterns) {
     if (pattern.hasMatch(text)) return key;
   }
   return null;
 }
-
-const _accents = {
-  'Á': 'A', 'À': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', //
-  'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E', //
-  'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I', //
-  'Ó': 'O', 'Ò': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O', //
-  'Ú': 'U', 'Ù': 'U', 'Û': 'U', 'Ü': 'U', //
-  'Ç': 'C', 'Ñ': 'N',
-};
-
-String _foldAccents(String s) => s.split('').map((c) => _accents[c] ?? c).join();

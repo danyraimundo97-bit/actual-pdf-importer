@@ -19,6 +19,7 @@ import '../../../shared/widgets/sheet_body.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../review/screens/review_screen_args.dart';
+import '../../categories/screens/match_categories_screen.dart';
 import '../inbox_controller.dart';
 import '../../../core/log/app_log.dart';
 
@@ -266,6 +267,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     final items = ref.watch(inboxProvider);
     final history = ref.watch(importHistoryProvider);
     final parseOnDevice = ref.watch(parseOnDeviceProvider);
+    final pendingMatches = ref.watch(pendingCategoryMatchesProvider).valueOrNull ?? 0;
     final hasBackend = ref.watch(appConfigProvider).backendUrl?.isNotEmpty ?? false;
     final hasFinished = items.any(
       (i) => i.status == InboxStatus.imported || i.status == InboxStatus.failed,
@@ -291,6 +293,22 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             if (backendConfig != null && backendConfig.usesAi && !parseOnDevice) ...[
               PrivacyBanner(providerName: backendConfig.aiProvider ?? 'an AI provider'),
               const SizedBox(height: Space.xl),
+            ],
+            if (pendingMatches > 0) ...[
+              InlineNote(
+                message:
+                    '$pendingMatches ${pendingMatches == 1 ? 'category' : 'categories'} the app learned '
+                    'before Actual was connected ${pendingMatches == 1 ? 'needs' : 'need'} an Actual category.',
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => context.push('/match-categories'),
+                  icon: const Icon(Icons.link_rounded, size: 18),
+                  label: const Text('Match your categories'),
+                ),
+              ),
+              const SizedBox(height: Space.md),
             ],
             LabeledField(label: 'Account', child: _buildAccountField()),
             const SizedBox(height: Space.xl),
