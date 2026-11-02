@@ -7,15 +7,18 @@ import 'package:go_router/go_router.dart';
 import '../features/import/inbox_controller.dart';
 import 'services/share_intent_service.dart';
 
-/// Bottom navigation around the four main tabs. Also owns share-sheet
-/// intake: a PDF shared into the app lands in the import inbox whichever
-/// tab is open, and the Import tab is brought forward.
+/// Bottom navigation around the four main tabs (Home, Budget, Import,
+/// Settings), and the quick-add button on Home and Budget. Also owns
+/// share-sheet intake: a PDF shared into the app lands in the import inbox
+/// whichever tab is open, and the Import tab is brought forward.
 class AppShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell shell;
 
   const AppShell({super.key, required this.shell});
 
-  static const importTabIndex = 1;
+  static const homeTabIndex = 0;
+  static const budgetTabIndex = 1;
+  static const importTabIndex = 2;
 
   @override
   ConsumerState<AppShell> createState() => _AppShellState();
@@ -62,8 +65,19 @@ class _AppShellState extends ConsumerState<AppShell> {
       ),
     );
 
+    final index = widget.shell.currentIndex;
+    final showAdd = index == AppShell.homeTabIndex || index == AppShell.budgetTabIndex;
+
     return Scaffold(
       body: widget.shell,
+      floatingActionButton: showAdd
+          ? FloatingActionButton.extended(
+              heroTag: 'quick-add',
+              onPressed: () => context.push('/add'),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add'),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: widget.shell.currentIndex,
         // Re-tapping the current tab returns it to its first page.
@@ -71,9 +85,14 @@ class _AppShellState extends ConsumerState<AppShell> {
             widget.shell.goBranch(i, initialLocation: i == widget.shell.currentIndex),
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights_rounded),
-            label: 'Dashboard',
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Home',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.donut_small_outlined),
+            selectedIcon: Icon(Icons.donut_small_rounded),
+            label: 'Budget',
           ),
           NavigationDestination(
             icon: Badge(
@@ -87,11 +106,6 @@ class _AppShellState extends ConsumerState<AppShell> {
               child: const Icon(Icons.inbox_rounded),
             ),
             label: 'Import',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.sell_outlined),
-            selectedIcon: Icon(Icons.sell_rounded),
-            label: 'Memory',
           ),
           const NavigationDestination(
             icon: Icon(Icons.settings_outlined),

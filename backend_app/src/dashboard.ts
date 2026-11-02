@@ -43,6 +43,7 @@ export interface Dashboard {
     payee: string | null;
     category: string | null;
     account: string;
+    accountId: string;
   }>;
 }
 
@@ -183,6 +184,7 @@ export function buildDashboard(input: DashboardInput): Dashboard {
       payee: t.payee ? (payeeNames.get(t.payee) ?? null) : null,
       category: t.category ? (categoryNames.get(t.category) ?? null) : null,
       account: accountById.get(t.account)!.name,
+      accountId: t.account,
     }));
 
   return {

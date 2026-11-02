@@ -9,6 +9,7 @@ import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../../../shared/widgets/inline_note.dart';
 import '../connection_controller.dart';
+import '../widgets/actual_server_card.dart';
 import '../widgets/connection_widgets.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -33,6 +34,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         setState(() => _tokenController.text = token);
       }
     });
+    // Check the saved connection right away, so the Actual server and the
+    // budgets show their real state without pressing "Save and test".
+    if (config.backendUrl != null && config.backendUrl!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+    }
+  }
+
+  Future<void> _refresh() async {
+    final controller = ref.read(connectionControllerProvider.notifier);
+    if (await controller.test() && ref.read(connectionControllerProvider).actualConfigured) {
+      await controller.loadBudgets();
+    }
   }
 
   @override
@@ -46,7 +59,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     FocusScope.of(context).unfocus();
     final controller = ref.read(connectionControllerProvider.notifier);
     final ok = await controller.saveAndTest(url: _urlController.text, token: _tokenController.text);
-    if (ok) await controller.loadBudgets();
+    if (ok && ref.read(connectionControllerProvider).actualConfigured) await controller.loadBudgets();
   }
 
   Future<void> _selectBudget(ActualBudget budget) async {
@@ -84,6 +97,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.xxl),
         children: [
           const _SectionTitle('Connection'),
+          Text('Backend', style: context.text.titleMedium),
+          const SizedBox(height: Space.xs),
+          Text('The bridge between this app and your Actual server.', style: muted),
+          const SizedBox(height: Space.md),
           ConnectionFields(
             urlController: _urlController,
             tokenController: _tokenController,
@@ -109,9 +126,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ),
           ),
+          const SizedBox(height: Space.xl),
+          Text('Actual server', style: context.text.titleMedium),
+          const SizedBox(height: Space.sm),
+          const ActualServerCard(),
           const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Budget'),
-          if (check.budgetsError != null)
+          if (!check.actualConfigured)
+            Text(
+              check.isConnected
+                  ? 'Connect an Actual server above to choose a budget.'
+                  : 'Connect the backend and an Actual server to choose a budget.',
+              style: muted,
+            )
+          else if (check.budgetsError != null)
             InlineNote(message: check.budgetsError!, tone: NoteTone.error)
           else if (!check.loadingBudgets && check.budgets.isEmpty)
             InlineNote(
@@ -130,6 +158,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               selectedSyncId: config.budgetSyncId,
               onSelect: _selectBudget,
             ),
+          const SizedBox(height: Space.xxl + Space.sm),
+          const _SectionTitle('Category memory'),
+          Text(
+            'The payee to category mappings that pre-fill categories when you import or add.',
+            style: muted,
+          ),
+          const SizedBox(height: Space.lg),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push('/settings/categories'),
+              icon: const Icon(Icons.sell_outlined, size: 18),
+              label: const Text('Open category memory'),
+            ),
+          ),
           const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Privacy'),
           Text(

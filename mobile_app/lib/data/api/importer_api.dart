@@ -5,7 +5,11 @@ import 'package:dio/dio.dart';
 import '../../core/errors/api_exception.dart';
 import '../models/actual_account.dart';
 import '../models/actual_budget.dart';
+import '../models/account_page.dart';
 import '../models/actual_category.dart';
+import '../models/actual_connection.dart';
+import '../models/budget_month.dart';
+import '../models/quick_add.dart';
 import '../models/backend_config.dart';
 import '../models/dashboard.dart';
 import '../models/import_result.dart';
@@ -92,6 +96,93 @@ class ImporterApi {
       ),
     );
     return Dashboard.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  // --- Actual connection (optional; see the backend's actual-connection.ts) --
+
+  Future<ActualConnection> getActualConnection() async {
+    final res = await _guarded(() => _dio.get('/actual/connection'));
+    return ActualConnection.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  /// Tests the server on the backend (reachable, recent enough, password
+  /// accepted) and saves it only if it works. Throws ApiException with
+  /// ACTUAL_UNREACHABLE / ACTUAL_AUTH_FAILED / ACTUAL_VERSION_TOO_OLD /
+  /// AUTH_REQUIRED / CONNECTION_LOCKED / INVALID_FIELD.
+  Future<ActualConnection> connectActual({required String serverUrl, required String password}) async {
+    final res = await _guarded(
+      () => _dio.put(
+        '/actual/connection',
+        data: {'serverUrl': serverUrl, 'password': password},
+        // The backend probes the server before answering.
+        options: Options(receiveTimeout: const Duration(seconds: 30)),
+      ),
+    );
+    return ActualConnection.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<ActualConnection> disconnectActual() async {
+    final res = await _guarded(() => _dio.delete('/actual/connection'));
+    return ActualConnection.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  // --- Everyday screens -------------------------------------------------
+
+  Future<QuickAddOptions> getQuickAddOptions({String? budgetSyncId}) async {
+    final res = await _guarded(
+      () => _dio.get('/quick-add/options', queryParameters: {'budgetSyncId': ?budgetSyncId}),
+    );
+    return QuickAddOptions.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  /// POST /transactions. Safe to retry with the same [clientId]: the
+  /// backend returns the transaction it already added.
+  Future<({String? id, bool created})> addTransaction({
+    required String accountId,
+    required DateTime date,
+    required int amountCents,
+    required String clientId,
+    String? payeeName,
+    String? categoryId,
+    String? notes,
+    String? budgetSyncId,
+    String? budgetPassword,
+  }) async {
+    final res = await _guarded(
+      () => _dio.post(
+        '/transactions',
+        data: {
+          'accountId': accountId,
+          'date': date.toIso8601String().substring(0, 10),
+          'amountCents': amountCents,
+          'clientId': clientId,
+          'payeeName': ?payeeName,
+          'categoryId': ?categoryId,
+          'notes': ?notes,
+          'budgetSyncId': ?budgetSyncId,
+          'budgetPassword': ?budgetPassword,
+        },
+      ),
+    );
+    final data = res.data as Map<String, dynamic>;
+    return (id: data['id'] as String?, created: data['created'] as bool? ?? true);
+  }
+
+  Future<AccountPage> getAccountPage(String accountId, {String? budgetSyncId, String? before, int limit = 50}) async {
+    final res = await _guarded(
+      () => _dio.get(
+        '/accounts/${Uri.encodeComponent(accountId)}/transactions',
+        queryParameters: {'limit': limit, 'budgetSyncId': ?budgetSyncId, 'before': ?before},
+      ),
+    );
+    return AccountPage.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  Future<BudgetMonth> getBudgetMonth({String? budgetSyncId, String? month}) async {
+    final res = await _guarded(
+      () => _dio.get('/budget-month', queryParameters: {'budgetSyncId': ?budgetSyncId, 'month': ?month}),
+    );
+    return BudgetMonth.fromJson(res.data as Map<String, dynamic>);
   }
 
   /// POST /parse. Long timeout override: in PARSER_MODE=ai/both a large

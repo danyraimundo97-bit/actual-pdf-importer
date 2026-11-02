@@ -5,6 +5,7 @@ import '../../core/errors/api_exception.dart';
 import '../../data/api/api_client.dart';
 import '../../data/api/importer_api.dart';
 import '../../data/models/actual_budget.dart';
+import '../../data/models/actual_connection.dart';
 import '../../data/models/backend_config.dart';
 import '../../data/providers.dart';
 import '../../shared/widgets/labeled_field.dart';
@@ -28,6 +29,14 @@ class ConnectionCheck {
   final bool loadingBudgets;
   final String? budgetsError;
 
+  /// The backend's link to Actual, once the backend has answered.
+  final ActualConnection? actual;
+  final ConnectionStatus actualStatus;
+  final String? actualMessage;
+
+  /// The backend's error code for the last failed Actual connect.
+  final String? actualErrorCode;
+
   const ConnectionCheck({
     this.status = ConnectionStatus.idle,
     this.message,
@@ -35,9 +44,17 @@ class ConnectionCheck {
     this.budgets = const [],
     this.loadingBudgets = false,
     this.budgetsError,
+    this.actual,
+    this.actualStatus = ConnectionStatus.idle,
+    this.actualMessage,
+    this.actualErrorCode,
   });
 
+  /// The backend answered and accepted the token.
   bool get isConnected => status == ConnectionStatus.connected;
+
+  /// ...and it has an Actual server.
+  bool get actualConfigured => isConnected && (actual?.configured ?? config?.actualConfigured ?? false);
 
   ConnectionCheck copyWith({
     ConnectionStatus? status,
@@ -46,8 +63,13 @@ class ConnectionCheck {
     List<ActualBudget>? budgets,
     bool? loadingBudgets,
     String? budgetsError,
+    ActualConnection? actual,
+    ConnectionStatus? actualStatus,
+    String? actualMessage,
+    String? actualErrorCode,
     bool clearMessage = false,
     bool clearBudgetsError = false,
+    bool clearActualMessage = false,
   }) {
     return ConnectionCheck(
       status: status ?? this.status,
@@ -56,6 +78,10 @@ class ConnectionCheck {
       budgets: budgets ?? this.budgets,
       loadingBudgets: loadingBudgets ?? this.loadingBudgets,
       budgetsError: clearBudgetsError ? null : (budgetsError ?? this.budgetsError),
+      actual: actual ?? this.actual,
+      actualStatus: actualStatus ?? this.actualStatus,
+      actualMessage: clearActualMessage ? null : (actualMessage ?? this.actualMessage),
+      actualErrorCode: clearActualMessage ? null : (actualErrorCode ?? this.actualErrorCode),
     );
   }
 }
@@ -104,14 +130,21 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
         return false;
       }
       final config = await api.getConfig();
-      _log.info('Connection test passed', {'parserMode': config.parserMode, 'ai': config.usesAi});
+      _log.info('Connection test passed', {
+        'parserMode': config.parserMode,
+        'ai': config.usesAi,
+        'actual': config.actualConfigured,
+      });
       state = state.copyWith(
         status: ConnectionStatus.connected,
         config: config,
+        actualStatus: config.actualConfigured ? ConnectionStatus.connected : ConnectionStatus.idle,
         message:
             'Connected. Parser mode: ${config.parserMode}'
             '${config.usesAi ? ', using ${config.aiProvider}' : ''}.',
       );
+      await loadActual();
+      ref.invalidate(backendConfigProvider);
       return true;
     } on ApiException catch (e) {
       _log.warn('Connection test failed', {'code': e.code, 'status': e.statusCode});
@@ -122,6 +155,78 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
             : e.message,
       );
       return false;
+    }
+  }
+
+  /// GET /actual/connection. Older backends don't have it: they always had
+  /// an Actual server, so that's assumed.
+  Future<void> loadActual() async {
+    try {
+      final actual = await ref.read(importerApiProvider).getActualConnection();
+      state = state.copyWith(
+        actual: actual,
+        actualStatus: actual.configured ? ConnectionStatus.connected : ConnectionStatus.idle,
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) {
+        state = state.copyWith(
+          actual: const ActualConnection(configured: true, locked: true),
+          actualStatus: ConnectionStatus.connected,
+        );
+      }
+    }
+  }
+
+  /// Points the backend at an Actual server. The backend checks it first
+  /// and keeps the old one if this one doesn't work.
+  Future<bool> connectActual({required String serverUrl, required String password}) async {
+    if (serverUrl.trim().isEmpty) {
+      state = state.copyWith(
+        actualStatus: ConnectionStatus.failed,
+        actualMessage: "Enter your Actual server's address first.",
+        actualErrorCode: 'INVALID_FIELD',
+      );
+      return false;
+    }
+    state = state.copyWith(actualStatus: ConnectionStatus.testing, clearActualMessage: true);
+    try {
+      final actual = await ref.read(importerApiProvider).connectActual(serverUrl: serverUrl.trim(), password: password);
+      _log.info('Actual server connected', {'serverVersion': actual.serverVersion});
+      state = state.copyWith(
+        actual: actual,
+        actualStatus: ConnectionStatus.connected,
+        actualMessage: actual.serverVersion == null
+            ? 'Connected to Actual.'
+            : 'Connected to Actual ${actual.serverVersion}.',
+      );
+      ref.invalidate(backendConfigProvider);
+      await loadBudgets();
+      return true;
+    } on ApiException catch (e) {
+      _log.warn('Actual connection failed', {'code': e.code, 'status': e.statusCode});
+      state = state.copyWith(
+        actualStatus: ConnectionStatus.failed,
+        actualMessage: actualErrorMessage(e),
+        actualErrorCode: e.code,
+      );
+      return false;
+    }
+  }
+
+  /// Unlinks the backend from Actual; it keeps running without one.
+  Future<void> disconnectActual() async {
+    try {
+      final actual = await ref.read(importerApiProvider).disconnectActual();
+      _log.info('Actual server disconnected');
+      state = state.copyWith(
+        actual: actual,
+        actualStatus: ConnectionStatus.idle,
+        budgets: const [],
+        clearActualMessage: true,
+      );
+      ref.invalidate(backendConfigProvider);
+    } on ApiException catch (e) {
+      state = state.copyWith(actualStatus: ConnectionStatus.failed, actualMessage: actualErrorMessage(e), actualErrorCode: e.code);
     }
   }
 
@@ -148,6 +253,20 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
 }
 
 const _log = AppLog('connection');
+
+/// What to tell the user for each way connecting to Actual can fail.
+String actualErrorMessage(ApiException e) => switch (e.code) {
+      'ACTUAL_UNREACHABLE' =>
+        "Couldn't reach Actual at that address. Check the address and that the backend can reach it "
+            "(in Docker, use the server's network address, not localhost).",
+      'ACTUAL_AUTH_FAILED' => 'Actual rejected the password. Use the password you log in to Actual with.',
+      'ACTUAL_VERSION_TOO_OLD' => e.message,
+      'AUTH_REQUIRED' =>
+        'The backend has no access token set, so it won\'t let the app change its Actual server. '
+            'Set IMPORT_TOKEN in the backend\'s .env, restart it, and enter the same token here.',
+      'CONNECTION_LOCKED' => "The Actual server is set in the backend's .env, so it can only be changed there.",
+      _ => e.message,
+    };
 
 final connectionControllerProvider =
     AutoDisposeNotifierProvider<ConnectionController, ConnectionCheck>(ConnectionController.new);

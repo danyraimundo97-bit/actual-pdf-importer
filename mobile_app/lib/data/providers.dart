@@ -9,6 +9,7 @@ import 'local/import_history_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
 import 'models/backend_config.dart';
+import 'models/budget_month.dart';
 import 'models/dashboard.dart';
 
 /// Overridden in main() with the real instance obtained via
@@ -124,6 +125,32 @@ final backendConfigProvider = FutureProvider.autoDispose<BackendConfig>((ref) {
   return ref.watch(importerApiProvider).getConfig();
 });
 
+/// How far the app is connected: the backend and Actual are both optional
+/// (docs/plans/core-app.md), so screens that need Actual check this and show
+/// the shared "connect" state instead of an error.
+enum LinkState {
+  /// No backend address set.
+  noBackend,
+
+  /// The backend answers but has no Actual server.
+  noActual,
+
+  /// Actual is connected but no budget is chosen yet.
+  noBudget,
+
+  /// Everything needed for Actual screens.
+  ready,
+}
+
+final linkStateProvider = FutureProvider.autoDispose<LinkState>((ref) async {
+  final config = ref.watch(appConfigProvider);
+  if (config.backendUrl == null || config.backendUrl!.isEmpty) return LinkState.noBackend;
+  final backend = await ref.watch(backendConfigProvider.future);
+  if (!backend.actualConfigured) return LinkState.noActual;
+  if (config.budgetSyncId == null) return LinkState.noBudget;
+  return LinkState.ready;
+});
+
 /// Bumped whenever the backend's payee→category memory may have changed
 /// behind the Memory tab's back — an import saves the categories used. The
 /// tab stays alive in the shell, so it listens to this to reload.
@@ -134,6 +161,13 @@ final categoryMemoryRevisionProvider = StateProvider<int>((ref) => 0);
 final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) {
   final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
   return ref.watch(importerApiProvider).getDashboard(budgetSyncId: budgetSyncId);
+});
+
+/// GET /budget-month for the active budget; `null` = the current month.
+/// Invalidated after a quick add or an import.
+final budgetMonthProvider = FutureProvider.autoDispose.family<BudgetMonth, String?>((ref, month) {
+  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
+  return ref.watch(importerApiProvider).getBudgetMonth(budgetSyncId: budgetSyncId, month: month);
 });
 
 final importHistoryStoreProvider = Provider<ImportHistoryStore>((ref) {

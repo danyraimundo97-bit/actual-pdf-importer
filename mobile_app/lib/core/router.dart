@@ -1,15 +1,18 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
 import 'log/error_hooks.dart';
+import '../features/accounts/screens/account_screen.dart';
+import '../features/budget/screens/budget_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/dev/dev_screen.dart';
 import '../features/diagnostics/diagnostics_screen.dart';
 import '../features/import/screens/import_screen.dart';
+import '../features/quick_add/screens/quick_add_screen.dart';
 import '../features/review/screens/review_screen.dart';
 import '../features/review/screens/review_screen_args.dart';
 import '../features/settings/screens/settings_screen.dart';
@@ -29,9 +32,12 @@ const _openRoutes = {'/welcome', '/setup', '/dev'};
 /// `redirect`, which go_router re-evaluates on every navigation, rather
 /// than by rebuilding the whole router when settings change.
 final routerProvider = Provider<GoRouter>((ref) {
+  final config = ref.read(appConfigProvider);
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/dashboard',
+    // Without a budget there is nothing to show on Home yet: start where
+    // the app already works.
+    initialLocation: config.budgetSyncId == null ? '/import' : '/dashboard',
     observers: [LogNavigatorObserver()],
     redirect: (context, state) {
       final onboarded = ref.read(appConfigProvider).onboarded;
@@ -44,7 +50,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/setup',
         builder: (context, state) => SetupScreen(
-          initialStep: (int.tryParse(state.uri.queryParameters['step'] ?? '') ?? 0).clamp(0, 3),
+          initialStep: (int.tryParse(state.uri.queryParameters['step'] ?? '') ?? 0).clamp(0, SetupScreen.lastStep),
         ),
       ),
       GoRoute(
@@ -52,14 +58,34 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => ReviewScreen(args: state.extra as ReviewScreenArgs),
       ),
+      GoRoute(
+        path: '/add',
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => const MaterialPage(fullscreenDialog: true, child: QuickAddScreen()),
+      ),
       if (kDebugMode) GoRoute(path: '/dev', builder: (context, state) => const DevScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(shell: shell),
         branches: [
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/dashboard', builder: (context, state) => const DashboardScreen()),
+              GoRoute(
+                path: '/dashboard',
+                builder: (context, state) => const DashboardScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'accounts/:id',
+                    builder: (context, state) => AccountScreen(
+                      accountId: state.pathParameters['id']!,
+                      accountName: state.extra as String?,
+                    ),
+                  ),
+                ],
+              ),
             ],
+          ),
+          StatefulShellBranch(
+            routes: [GoRoute(path: '/budget', builder: (context, state) => const BudgetScreen())],
           ),
           StatefulShellBranch(
             routes: [GoRoute(path: '/import', builder: (context, state) => const ImportScreen())],
@@ -67,17 +93,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/categories',
-                builder: (context, state) => const CategoryMemoryScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
                 path: '/settings',
                 builder: (context, state) => const SettingsScreen(),
                 routes: [
+                  GoRoute(
+                    path: 'categories',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const CategoryMemoryScreen(),
+                  ),
                   GoRoute(
                     path: 'diagnostics',
                     parentNavigatorKey: _rootNavigatorKey,

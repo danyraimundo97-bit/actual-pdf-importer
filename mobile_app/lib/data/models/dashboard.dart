@@ -116,6 +116,9 @@ class RecentTransaction {
   final String? category;
   final String account;
 
+  /// Null from backends older than the account screen.
+  final String? accountId;
+
   const RecentTransaction({
     required this.id,
     required this.date,
@@ -123,6 +126,7 @@ class RecentTransaction {
     this.payee,
     this.category,
     required this.account,
+    this.accountId,
   });
 
   factory RecentTransaction.fromJson(Map<String, dynamic> json) => RecentTransaction(
@@ -132,5 +136,6 @@ class RecentTransaction {
     payee: json['payee'] as String?,
     category: json['category'] as String?,
     account: json['account'] as String,
+    accountId: json['accountId'] as String?,
   );
 }

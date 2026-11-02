@@ -240,6 +240,26 @@ tests.
   versions): add a cash expense, see it on the dashboard and in the budget month, retry a save
   with the network cut mid-request and confirm no duplicate.
 
+## As built (2026-11-02)
+
+Implemented on `feature/core-app`; differences from the plan above:
+
+- **Quick add uses `addTransactions`, not `importTransactions`.** An import fuzzy-matches any
+  transaction with the same amount within ±7 days in the account, so a second identical
+  purchase would be swallowed. Idempotency is done by the backend itself: inside the write turn
+  it looks for `imported_id = "app-<clientId>"` before adding. Rules still run.
+- **Settings connection**: `DELETE /actual/connection` leaves `ACTUAL_DATA_DIR` in place instead
+  of deleting it (the next connection re-downloads what it needs; deleting a configurable
+  directory wasn't worth the risk).
+- **"How it works"** describes what works on this branch (parsing is still on the backend). The
+  predefined-categories peek and the "works without the backend" copy come with
+  `feature/dart-parser`, as does Review without Actual (Import shows "Connect Actual to import"
+  in the account field for now).
+- **Home** now lists Accounts and Latest transactions first (both tap through to the account
+  screen); the dashboard's recent rows carry `accountId` for that.
+- Budget: tracking vs. envelope budgets are not told apart yet; both render from the same
+  `getBudgetMonth` fields.
+
 ## Not in this plan
 
 - Editing or removing transactions (needs the TODO §2 soft-delete rule and better auth first).

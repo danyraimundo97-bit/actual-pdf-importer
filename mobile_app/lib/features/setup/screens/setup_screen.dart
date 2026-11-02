@@ -3,19 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/actual_budget.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
-import '../../../shared/widgets/inline_note.dart';
-import '../../settings/connection_controller.dart';
-import '../../settings/widgets/connection_widgets.dart';
+import '../widgets/actual_step.dart';
 
-/// Four steps from a fresh install to a working dashboard: connect to the
-/// importer, confirm what it can do, pick a budget, done. Uses the same
-/// ConnectionController as Settings, so both run identical checks.
+/// The setup guide, nothing required: how the app works, then connecting to
+/// Actual, offered as the last step ("Bring your budget along"). The backend
+/// and Actual are both optional (docs/plans/core-app.md), so the guide ends
+/// on that page whether or not anything was connected.
 class SetupScreen extends ConsumerStatefulWidget {
-  /// Step to open on (0-3). The dev page uses it to jump straight in.
+  /// Step to open on (0-[lastStep]). The dev page uses it to jump straight in.
   final int initialStep;
+
+  static const lastStep = 1;
 
   const SetupScreen({super.key, this.initialStep = 0});
 
@@ -24,13 +24,8 @@ class SetupScreen extends ConsumerStatefulWidget {
 }
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
-  static const _stepCount = 4;
-  static const _titles = [
-    'Connect to your importer',
-    'Connection works',
-    'Choose a budget',
-    "You're all set",
-  ];
+  static const _stepCount = SetupScreen.lastStep + 1;
+  static const _titles = ['How it works', 'Bring your budget along'];
 
   late final PageController _pages = PageController(initialPage: widget.initialStep);
   late int _step = widget.initialStep;
@@ -44,10 +39,6 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     ref.read(secretStoreProvider).apiToken.then((token) {
       if (mounted && token != null) _tokenController.text = token;
     });
-    // Jumping in past step 1 (dev page) still needs the connection state.
-    if (widget.initialStep > 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFor(widget.initialStep));
-    }
   }
 
   @override
@@ -58,41 +49,27 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
     super.dispose();
   }
 
-  Future<void> _refreshFor(int step) async {
-    final controller = ref.read(connectionControllerProvider.notifier);
-    if (await controller.test() && step >= 2) await controller.loadBudgets();
-  }
-
   void _goTo(int step) {
     setState(() => _step = step);
-    final reduce = MediaQuery.disableAnimationsOf(context);
-    if (reduce) {
+    if (MediaQuery.disableAnimationsOf(context)) {
       _pages.jumpToPage(step);
     } else {
-      _pages.animateToPage(
-        step,
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOutCubic,
-      );
+      _pages.animateToPage(step, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
     }
   }
 
-  Future<void> _connect() async {
-    FocusScope.of(context).unfocus();
-    final ok = await ref
-        .read(connectionControllerProvider.notifier)
-        .saveAndTest(url: _urlController.text, token: _tokenController.text);
-    if (ok && mounted) _goTo(1);
-  }
-
-  void _toBudgets() {
-    ref.read(connectionControllerProvider.notifier).loadBudgets();
-    _goTo(2);
-  }
-
-  Future<void> _finish() async {
+  /// Ends the guide: on Home with a budget, otherwise on Import (what works
+  /// without Actual), saying where to connect later.
+  Future<void> _finish({required bool connected}) async {
     await ref.read(appConfigProvider.notifier).setOnboarded(true);
-    if (mounted) context.go('/dashboard');
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    context.go(connected ? '/dashboard' : '/import');
+    if (!connected) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('You can connect Actual any time in Settings → Connection.')),
+      );
+    }
   }
 
   void _back() {
@@ -116,11 +93,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          leading: IconButton(
-            tooltip: 'Back',
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: _back,
-          ),
+          leading: IconButton(tooltip: 'Back', icon: const Icon(Icons.arrow_back_rounded), onPressed: _back),
           title: Text(
             'Step ${_step + 1} of $_stepCount',
             style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
@@ -137,9 +110,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
               child: AnimatedSwitcher(
-                duration: MediaQuery.disableAnimationsOf(context)
-                    ? Duration.zero
-                    : const Duration(milliseconds: 200),
+                duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 200),
                 child: Align(
                   key: ValueKey(_step),
                   alignment: Alignment.centerLeft,
@@ -152,14 +123,12 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 controller: _pages,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  _ConnectStep(
+                  _HowItWorksStep(onNext: () => _goTo(1)),
+                  ActualStep(
                     urlController: _urlController,
                     tokenController: _tokenController,
-                    onConnect: _connect,
+                    onFinish: _finish,
                   ),
-                  _CheckStep(onNext: _toBudgets),
-                  _BudgetStep(onNext: () => _goTo(3)),
-                  _DoneStep(onFinish: _finish),
                 ],
               ),
             ),
@@ -232,104 +201,39 @@ class _StepLayout extends StatelessWidget {
   }
 }
 
-class _ConnectStep extends ConsumerWidget {
-  final TextEditingController urlController;
-  final TextEditingController tokenController;
-  final VoidCallback onConnect;
-
-  const _ConnectStep({
-    required this.urlController,
-    required this.tokenController,
-    required this.onConnect,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final check = ref.watch(connectionControllerProvider);
-    final failed = check.status == ConnectionStatus.failed;
-    return _StepLayout(
-      action: BusyButton(
-        label: 'Connect',
-        busy: check.status == ConnectionStatus.testing,
-        onPressed: onConnect,
-      ),
-      children: [
-        Text(
-          'The app talks to backend_app, which talks to your Actual server. Enter '
-          'the address it runs on and its access token.',
-          style: context.text.bodyLarge?.copyWith(color: context.colors.onSurfaceVariant),
-        ),
-        const SizedBox(height: Space.xl),
-        ConnectionFields(
-          urlController: urlController,
-          tokenController: tokenController,
-          onSubmitted: onConnect,
-        ),
-        if (failed && check.message != null) ...[
-          const SizedBox(height: Space.lg),
-          InlineNote(message: check.message!, tone: NoteTone.error),
-        ],
-      ],
-    );
-  }
-}
-
-class _CheckStep extends ConsumerWidget {
+class _HowItWorksStep extends StatelessWidget {
   final VoidCallback onNext;
 
-  const _CheckStep({required this.onNext});
+  const _HowItWorksStep({required this.onNext});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final check = ref.watch(connectionControllerProvider);
-    final config = check.config;
-    final muted = context.text.bodyLarge?.copyWith(color: context.colors.onSurfaceVariant);
+  Widget build(BuildContext context) {
     return _StepLayout(
-      action: BusyButton(label: 'Continue', onPressed: check.isConnected ? onNext : null),
-      children: [
-        if (check.status == ConnectionStatus.testing)
-          const LinearProgressIndicator()
-        else if (!check.isConnected)
-          InlineNote(
-            message: check.message ?? 'Not connected yet. Go back and enter the address.',
-            tone: NoteTone.error,
-          )
-        else ...[
-          InlineNote(
-            message: 'The importer answered and accepted your token.',
-            tone: NoteTone.success,
-          ),
-          const SizedBox(height: Space.xl),
-          _Fact(
-            icon: Icons.document_scanner_outlined,
-            title: 'How statements are read',
-            body: switch (config?.parserMode) {
-              'regex' =>
-                'Built-in parsers for ActivoBank, Moey and Trade Republic. '
-                    'Nothing leaves your network.',
-              'ai' => 'Every statement is read by ${config?.aiProvider ?? 'an AI provider'}.',
-              _ =>
-                'Built-in parsers first. Statements they do not recognise go to '
-                    '${config?.aiProvider ?? 'an AI provider'}.',
-            },
-          ),
-          if (config?.usesAi ?? false)
-            _Fact(
-              icon: Icons.cloud_upload_outlined,
-              title: 'Privacy',
-              body:
-                  'With this mode, some statements leave your network. Change PARSER_MODE '
-                  'in the backend .env to "regex" to keep everything local.',
-            ),
-          _Fact(
-            icon: Icons.sell_outlined,
-            title: 'Categories',
-            body:
-                'Suggested from payees you have categorized before. You confirm every '
-                'line before anything is imported.',
-          ),
-          Text('Next, choose which Actual budget to import into.', style: muted),
-        ],
+      action: BusyButton(label: 'Continue', onPressed: onNext),
+      children: const [
+        _Fact(
+          icon: Icons.ios_share_rounded,
+          title: 'Statements in, from anywhere',
+          body: 'Share a PDF straight from your bank app, or pick a few at once. '
+              'ActivoBank, Moey and Trade Republic are read by built-in parsers.',
+        ),
+        _Fact(
+          icon: Icons.fact_check_outlined,
+          title: 'You check every line',
+          body: 'Nothing is imported until you have reviewed it. Fix a payee, a date or an amount '
+              'before it goes anywhere.',
+        ),
+        _Fact(
+          icon: Icons.sell_outlined,
+          title: 'Categories that learn',
+          body: 'Categorise a payee once and it is suggested the next time it shows up.',
+        ),
+        _Fact(
+          icon: Icons.lock_outline_rounded,
+          title: 'Private by default',
+          body: 'Statements are read in memory and never stored. They only reach an AI service '
+              'if you turn that on in the backend.',
+        ),
       ],
     );
   }
@@ -366,107 +270,6 @@ class _Fact extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _BudgetStep extends ConsumerWidget {
-  final VoidCallback onNext;
-
-  const _BudgetStep({required this.onNext});
-
-  Future<void> _select(BuildContext context, WidgetRef ref, ActualBudget budget) async {
-    await chooseBudget(context, ref, budget);
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final check = ref.watch(connectionControllerProvider);
-    final selected = ref.watch(appConfigProvider).budgetSyncId;
-    final hasSelection = selected != null && check.budgets.any((b) => b.syncId == selected);
-
-    return _StepLayout(
-      action: BusyButton(label: 'Continue', onPressed: hasSelection ? onNext : null),
-      children: [
-        Text(
-          'Imported transactions go into this budget. You can switch later in Settings.',
-          style: context.text.bodyLarge?.copyWith(color: context.colors.onSurfaceVariant),
-        ),
-        const SizedBox(height: Space.xl),
-        if (check.budgetsError != null) ...[
-          InlineNote(message: check.budgetsError!, tone: NoteTone.error),
-          const SizedBox(height: Space.sm),
-          _ReloadBudgetsButton(label: 'Try again'),
-        ] else if (!check.loadingBudgets && check.budgets.isEmpty) ...[
-          const InlineNote(message: noBudgetsMessage),
-          const SizedBox(height: Space.sm),
-          _ReloadBudgetsButton(label: 'Refresh'),
-        ] else
-          BudgetList(
-            budgets: check.budgets,
-            loading: check.loadingBudgets,
-            selectedSyncId: selected,
-            onSelect: (b) => _select(context, ref, b),
-          ),
-      ],
-    );
-  }
-}
-
-/// Re-fetches the budget list — after a failure, or after creating the first
-/// budget in Actual while this step is open.
-class _ReloadBudgetsButton extends ConsumerWidget {
-  final String label;
-
-  const _ReloadBudgetsButton({required this.label});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: () => ref.read(connectionControllerProvider.notifier).loadBudgets(),
-        icon: const Icon(Icons.refresh_rounded, size: 18),
-        label: Text(label),
-      ),
-    );
-  }
-}
-
-class _DoneStep extends ConsumerWidget {
-  final Future<void> Function() onFinish;
-
-  const _DoneStep({required this.onFinish});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final config = ref.watch(appConfigProvider);
-    final muted = context.text.bodyLarge?.copyWith(color: context.colors.onSurfaceVariant);
-    return _StepLayout(
-      action: BusyButton(label: 'Open dashboard', onPressed: onFinish),
-      children: [
-        Text(
-          'Connected to ${config.backendUrl ?? 'your importer'} and importing into '
-          '"${config.budgetName ?? 'your budget'}".',
-          style: muted,
-        ),
-        const SizedBox(height: Space.xl),
-        const _Fact(
-          icon: Icons.insights_outlined,
-          title: 'Dashboard',
-          body: 'Balances, money in and out, and where it went, straight from Actual.',
-        ),
-        const _Fact(
-          icon: Icons.inbox_outlined,
-          title: 'Import',
-          body: 'Add statements in bulk or share them from your bank app, then review each one.',
-        ),
-        const _Fact(
-          icon: Icons.sell_outlined,
-          title: 'Memory',
-          body: 'The payee to category mappings that make suggestions better over time.',
-        ),
-      ],
     );
   }
 }

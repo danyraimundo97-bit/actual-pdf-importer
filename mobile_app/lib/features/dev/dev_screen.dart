@@ -9,6 +9,7 @@ import '../../data/models/parsed_transaction.dart';
 import '../../data/providers.dart';
 import '../../shared/widgets/inline_note.dart';
 import '../review/screens/review_screen_args.dart';
+import '../setup/screens/setup_screen.dart';
 
 /// Values baked in with `flutter run --dart-define-from-file=dev.json`
 /// (see dev.example.json). Empty when not provided.
@@ -179,10 +180,12 @@ class DevScreen extends ConsumerWidget {
             children: [
               jump('Welcome', '/welcome'),
               jump('Logs', '/settings/diagnostics'),
-              for (var step = 0; step < 4; step++) jump('Setup ${step + 1}', '/setup?step=$step'),
-              jump('Dashboard', '/dashboard', tab: true),
+              for (var step = 0; step <= SetupScreen.lastStep; step++) jump('Setup ${step + 1}', '/setup?step=$step'),
+              jump('Home', '/dashboard', tab: true),
+              jump('Budget', '/budget', tab: true),
               jump('Import', '/import', tab: true),
-              jump('Memory', '/categories', tab: true),
+              jump('Quick add', '/add'),
+              jump('Memory', '/settings/categories'),
               jump('Settings', '/settings', tab: true),
               jump('Review (sample)', '/review', extra: _sampleReview(config.budgetSyncId)),
             ],

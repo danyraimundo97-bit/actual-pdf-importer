@@ -17,6 +17,7 @@ import '../../../shared/widgets/labeled_field.dart';
 import '../../../shared/widgets/privacy_banner.dart';
 import '../../../shared/widgets/sheet_body.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../../shared/widgets/connect_actual_state.dart';
 import '../../review/screens/review_screen_args.dart';
 import '../inbox_controller.dart';
 import '../../../core/log/app_log.dart';
@@ -37,6 +38,10 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   List<ActualAccount> _accounts = [];
   bool _loadingAccounts = true;
   String? _accountsError;
+
+  /// Actual isn't connected (it's optional): statements can still be read,
+  /// but there's no account to import into yet.
+  bool _actualMissing = false;
   ActualAccount? _selectedAccount;
   String? _pickError;
 
@@ -50,6 +55,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     setState(() {
       _loadingAccounts = true;
       _accountsError = null;
+      _actualMissing = false;
     });
     final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
     try {
@@ -65,6 +71,10 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       });
     } on ApiException catch (e) {
       if (!mounted) return;
+      if (isActualNotConnected(e)) {
+        setState(() => _actualMissing = true);
+        return;
+      }
       setState(
         () => _accountsError = e.isUnauthorized
             ? 'The importer rejected the access token. Check it in Settings.'
@@ -291,6 +301,23 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   Widget _buildAccountField() {
     if (_loadingAccounts) {
       return const Skeleton(height: 52, radius: Radii.control);
+    }
+    if (_actualMissing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const InlineNote(
+            message: 'Connect Actual to import: statements are read and reviewed here, '
+                'then go into one of your Actual accounts.',
+          ),
+          const SizedBox(height: Space.xs),
+          TextButton.icon(
+            onPressed: () => context.go('/settings'),
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: const Text('Connect Actual'),
+          ),
+        ],
+      );
     }
     if (_accountsError != null || _accounts.isEmpty) {
       return Column(
