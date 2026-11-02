@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,9 +7,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mobile_app/core/errors/api_exception.dart';
+import 'package:mobile_app/data/api/categories_api.dart';
 import 'package:mobile_app/data/api/importer_api.dart';
+import 'package:mobile_app/data/models/category_mapping.dart';
 import 'package:mobile_app/data/models/import_result.dart';
 import 'package:mobile_app/data/models/parse_result.dart';
+import 'package:mobile_app/data/pdf/pdf_text_extractor.dart';
 import 'package:mobile_app/data/providers.dart';
 import 'package:mobile_app/features/import/inbox_controller.dart';
 
@@ -40,6 +45,57 @@ class _FakeImporterApi implements ImporterApi {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// The PDF's first byte picks what the "PDF" is: see [_DeviceFile].
+class _FakeExtractor implements PdfTextExtractor {
+  @override
+  Future<String> extractText(Uint8List bytes, {String? password}) async {
+    switch (_DeviceFile.values[bytes.first]) {
+      case _DeviceFile.moey:
+        return File('../fixtures/parsers/moey-basic.pdfium.txt').readAsStringSync();
+      case _DeviceFile.unknownBank:
+        return 'Some other bank\n01-01-2026 COFFEE 2,50';
+      case _DeviceFile.locked when password != '1234':
+        throw PdfReadException(password == null ? PdfReadFailure.passwordRequired : PdfReadFailure.passwordIncorrect);
+      case _DeviceFile.locked:
+        return File('../fixtures/parsers/moey-basic.pdfium.txt').readAsStringSync();
+      case _DeviceFile.notPdf:
+        throw const PdfReadException(PdfReadFailure.unreadable);
+    }
+  }
+}
+
+enum _DeviceFile { moey, unknownBank, locked, notPdf }
+
+Uint8List _file(_DeviceFile f) => Uint8List.fromList([f.index]);
+
+/// Category memory with one mapping per scope.
+class _FakeCategoriesApi implements CategoriesApi {
+  _FakeCategoriesApi({this.fail = false});
+  final bool fail;
+  final scopes = <String?>[];
+
+  @override
+  Future<List<CategoryMapping>> list({String? budgetSyncId}) async {
+    scopes.add(budgetSyncId);
+    if (fail) throw const ApiException(message: 'Could not reach the importer backend.');
+    return [
+      if (budgetSyncId == null) const CategoryMapping(payee: 'any', categoryId: 'old', updatedAt: ''),
+      if (budgetSyncId != null) CategoryMapping(payee: _firstPayee, categoryId: 'cat-1', updatedAt: ''),
+    ];
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// The first movement's payee in moey-basic, in different case and
+/// spacing, to prove the match is normalised like the backend's.
+final _firstPayee = () {
+  final expected = jsonDecode(File('../fixtures/parsers/moey-basic.expected.json').readAsStringSync());
+  final payee = (expected['transactions'] as List).first['payee'] as String;
+  return '  ${payee.toUpperCase().replaceAll(' ', '   ')} ';
+}();
+
 Future<void> _settle() async {
   for (var i = 0; i < 10; i++) {
     await Future<void>.delayed(Duration.zero);
@@ -51,7 +107,9 @@ void main() {
   late _FakeImporterApi api;
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    // These cover the backend parser: Settings → "Read statements on
+    // this phone" off. The on-device path is the group further down.
+    SharedPreferences.setMockInitialValues({'parse_on_device': false});
     final prefs = await SharedPreferences.getInstance();
     api = _FakeImporterApi();
     container = ProviderContainer(
@@ -113,5 +171,131 @@ void main() {
     inbox().clearFinished();
 
     expect(container.read(inboxProvider).map((i) => i.filename), ['locked.pdf']);
+  });
+
+  group('on the device', () {
+    late ProviderContainer device;
+    late _FakeCategoriesApi categories;
+
+    Future<void> start({String? backendUrl, bool categoriesFail = false}) async {
+      SharedPreferences.setMockInitialValues({
+        'backend_url': ?backendUrl,
+        if (backendUrl != null) 'budget_sync_id': 'budget-1',
+      });
+      final prefs = await SharedPreferences.getInstance();
+      categories = _FakeCategoriesApi(fail: categoriesFail);
+      device = ProviderContainer(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          importerApiProvider.overrideWithValue(api),
+          categoriesApiProvider.overrideWithValue(categories),
+          pdfTextExtractorProvider.overrideWithValue(_FakeExtractor()),
+        ],
+      );
+      addTearDown(device.dispose);
+    }
+
+    InboxController deviceInbox() => device.read(inboxProvider.notifier);
+
+    // Parsing runs in a background isolate (compute), so wait for real
+    // until nothing is queued or being read.
+    Future<void> idle() async {
+      bool busy() =>
+          device.read(inboxProvider).any((i) => i.status == InboxStatus.queued || i.status == InboxStatus.parsing);
+      for (var i = 0; i < 500 && (busy() || i == 0); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await _settle();
+    }
+
+    InboxItem only() => device.read(inboxProvider).single;
+
+    test('reads a known bank without uploading it, and without a backend', () async {
+      await start();
+      deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      expect(api.parsed, isEmpty);
+      expect(categories.scopes, isEmpty, reason: 'no backend, so nothing to ask');
+      expect(only().status, InboxStatus.ready);
+      expect(only().parsedOnDevice, isTrue);
+      expect(only().parseResult!.bankId, 'moey');
+      expect(only().parseResult!.transactions, isNotEmpty);
+      expect(only().parseResult!.transactions.every((t) => t.suggestedCategoryId == null), isTrue);
+    });
+
+    test("suggests categories from the backend's memory, budget first", () async {
+      await start(backendUrl: 'http://backend');
+      deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      expect(api.parsed, isEmpty, reason: 'only the mappings are fetched, never the PDF');
+      expect(categories.scopes, ['budget-1', null]);
+      final txs = only().parseResult!.transactions;
+      expect(txs.first.suggestedCategoryId, 'cat-1');
+      expect(txs.skip(1).every((t) => t.suggestedCategoryId == null), isTrue);
+    });
+
+    test('an unreachable backend still gives a reviewable statement', () async {
+      await start(backendUrl: 'http://backend', categoriesFail: true);
+      deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      expect(only().status, InboxStatus.ready);
+      expect(only().parseResult!.transactions.every((t) => t.suggestedCategoryId == null), isTrue);
+    });
+
+    test('an unknown bank waits for the user before anything is uploaded', () async {
+      await start(backendUrl: 'http://backend');
+      deviceInbox().add(filename: 'odd.pdf', bytes: _file(_DeviceFile.unknownBank));
+      await idle();
+
+      expect(only().status, InboxStatus.unrecognized);
+      expect(only().recognizedBank, isNull);
+      expect(api.parsed, isEmpty);
+
+      deviceInbox().sendToBackend(only().id);
+      await idle();
+
+      expect(api.parsed, ['odd.pdf']);
+      expect(only().status, InboxStatus.failed, reason: 'the fake backend does not know it either');
+    });
+
+    test('a locked statement asks for the password, then keeps it for the backend', () async {
+      await start();
+      deviceInbox().add(filename: 'locked.pdf', bytes: _file(_DeviceFile.locked));
+      await idle();
+      expect(only().status, InboxStatus.needsPassword);
+      expect(only().wrongPassword, isFalse);
+
+      deviceInbox().retry(only().id, password: 'nope');
+      await idle();
+      expect(only().status, InboxStatus.needsPassword);
+      expect(only().wrongPassword, isTrue);
+
+      deviceInbox().retry(only().id, password: '1234');
+      await idle();
+      expect(only().status, InboxStatus.ready);
+      expect(only().password, '1234');
+    });
+
+    test('a file that is not a PDF fails', () async {
+      await start();
+      deviceInbox().add(filename: 'notes.pdf', bytes: _file(_DeviceFile.notPdf));
+      await idle();
+
+      expect(only().status, InboxStatus.failed);
+      expect(api.parsed, isEmpty);
+    });
+
+    test('turning the setting off sends statements to the backend again', () async {
+      await start(backendUrl: 'http://backend');
+      device.read(parseOnDeviceProvider.notifier).state = false;
+      deviceInbox().add(filename: 'ok.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      expect(api.parsed, ['ok.pdf']);
+      expect(only().parsedOnDevice, isFalse);
+    });
   });
 }

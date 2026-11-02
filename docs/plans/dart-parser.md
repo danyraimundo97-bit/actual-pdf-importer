@@ -340,6 +340,35 @@ passes; off = today's behaviour. Lets the user fall back if a bank changes layou
 Tests: inbox controller with a fake extractor (local success, unrecognised → AI offer, backend
 down → still categorised from local memory), CSV export, parser package tests, existing `inbox_controller_test.dart` kept green.
 
+### Phase 5 as built (2026-11-02)
+
+Phase 4 (on-device categories) isn't built yet, so suggestions come from the backend's category
+memory when there is a backend, and otherwise there are none.
+
+- Inbox (`inbox_controller.dart`): with "Read statements on this phone" on (default), each PDF is
+  read by `LocalStatementReader`. Recognised with movements → `ready`, marked `parsedOnDevice`.
+  Password failures → `needsPassword` as before; a non-PDF → `failed`. Not recognised (or
+  recognised with zero movements) → new `InboxStatus.unrecognized`, with `recognizedBank` when a
+  parser claimed it. The PDF is uploaded only from there, by `sendToBackend`, after a dialog that
+  names the AI provider when the backend uses one. The password that opened it is kept on the
+  item (memory only) for that upload. Setting off → the old `/parse` path, unchanged.
+- Suggestions: `GET /categories` for the budget and the unscoped bucket, matched with
+  `categoryMemoryKey` (the backend's `normalizeKey`): budget mapping first, then unscoped. A failed
+  fetch logs a warning and leaves the lines uncategorised.
+- Without a backend, the import screen doesn't ask for accounts; it shows the "Connect Actual"
+  note. Review opens whenever accounts aren't loading. With no account it shows "Export N as CSV"
+  and a note; with one, export is an app-bar action next to import.
+- CSV (`features/review/csv_export.dart`): `date,payee,amount,category`, CRLF, RFC 4180 quoting,
+  UTF-8 with BOM, amounts as `-12.30` from integer cents. No `notes` column (nothing to put in it
+  yet). Shared through `share_plus` from memory; the share sheet may stage the file in the app's
+  cache to hand it over, and the app keeps no copy.
+- The privacy banner about the AI provider shows only when parsing on the backend; on the device,
+  the send dialog says it instead.
+- Tests: inbox on the device (no backend, suggestions, backend down, unrecognised then sent,
+  passwords, non-PDF, setting off), suggestion matching, CSV, Review without an account.
+- Not done: the dev-screen comparison of device vs `/parse` (the real-statement tests cover it),
+  and running on an Android phone.
+
 ## Phase 6 — Transition
 
 - The backend's job narrows to syncing with Actual, backups (backups plan) and the AI parser.

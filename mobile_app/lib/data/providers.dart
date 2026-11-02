@@ -45,7 +45,12 @@ class AppConfig {
 
   const AppConfig({this.backendUrl, this.budgetSyncId, this.budgetName, this.onboarded = false});
 
-  AppConfig copyWith({String? backendUrl, String? budgetSyncId, String? budgetName, bool? onboarded}) {
+  AppConfig copyWith({
+    String? backendUrl,
+    String? budgetSyncId,
+    String? budgetName,
+    bool? onboarded,
+  }) {
     return AppConfig(
       backendUrl: backendUrl ?? this.backendUrl,
       budgetSyncId: budgetSyncId ?? this.budgetSyncId,
@@ -67,7 +72,9 @@ class AppConfigController extends StateNotifier<AppConfig> {
           // Installs from before the setup guide existed have no flag;
           // if they are already connected to a budget, don't send them
           // through the welcome screen again.
-          onboarded: _store.onboarded ?? ((_store.backendUrl?.isNotEmpty ?? false) && _store.budgetSyncId != null),
+          onboarded:
+              _store.onboarded ??
+              ((_store.backendUrl?.isNotEmpty ?? false) && _store.budgetSyncId != null),
         ),
       );
 
@@ -113,6 +120,15 @@ final importerApiProvider = Provider<ImporterApi>((ref) {
 /// On-device PDF reading (docs/plans/dart-parser.md, Phase 3). Tests
 /// override [pdfTextExtractorProvider] with a fake.
 final pdfTextExtractorProvider = Provider<PdfTextExtractor>((ref) => PdfrxTextExtractor());
+
+/// Settings → "Read statements on this phone". Change it through
+/// [setParseOnDevice] so the stored value and the screens stay in step.
+final parseOnDeviceProvider = StateProvider<bool>((ref) => ref.watch(settingsStoreProvider).parseOnDevice);
+
+Future<void> setParseOnDevice(WidgetRef ref, bool value) async {
+  await ref.read(settingsStoreProvider).setParseOnDevice(value);
+  ref.read(parseOnDeviceProvider.notifier).state = value;
+}
 
 final localStatementReaderProvider = Provider<LocalStatementReader>((ref) {
   return LocalStatementReader(ref.watch(pdfTextExtractorProvider));
@@ -177,6 +193,7 @@ final importHistoryStoreProvider = Provider<ImportHistoryStore>((ref) {
   return ImportHistoryStore(ref.watch(sharedPreferencesProvider));
 });
 
-final importHistoryProvider = StateNotifierProvider<ImportHistoryController, List<ImportHistoryEntry>>((ref) {
-  return ImportHistoryController(ref.watch(importHistoryStoreProvider));
-});
+final importHistoryProvider =
+    StateNotifierProvider<ImportHistoryController, List<ImportHistoryEntry>>((ref) {
+      return ImportHistoryController(ref.watch(importHistoryStoreProvider));
+    });

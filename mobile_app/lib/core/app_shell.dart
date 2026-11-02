@@ -60,7 +60,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     final inboxWaiting = ref.watch(
       inboxProvider.select(
         (items) => items
-            .where((i) => i.status == InboxStatus.ready || i.status == InboxStatus.needsPassword)
+            .where(
+              (i) =>
+                  i.status == InboxStatus.ready ||
+                  i.status == InboxStatus.needsPassword ||
+                  i.status == InboxStatus.unrecognized,
+            )
             .length,
       ),
     );

@@ -9,6 +9,7 @@ class SettingsStore {
   static const _kLastAccountId = 'last_account_id';
   static const _kOnboarded = 'onboarded';
   static const _kDebugLogging = 'debug_logging';
+  static const _kParseOnDevice = 'parse_on_device';
 
   final SharedPreferences _prefs;
 
@@ -35,6 +36,12 @@ class SettingsStore {
   /// (`--dart-define=LOG_DEBUG`).
   bool? get debugLogging => _prefs.getBool(_kDebugLogging);
   Future<void> setDebugLogging(bool value) => _prefs.setBool(_kDebugLogging, value);
+
+  /// Read statements on the phone (default) instead of uploading them to
+  /// the backend's parser. Off is the fallback for a bank whose layout
+  /// changed before the app's parsers caught up.
+  bool get parseOnDevice => _prefs.getBool(_kParseOnDevice) ?? true;
+  Future<void> setParseOnDevice(bool value) => _prefs.setBool(_kParseOnDevice, value);
 
   Future<void> clear() => _prefs.clear();
 }

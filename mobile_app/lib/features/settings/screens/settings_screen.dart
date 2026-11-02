@@ -84,6 +84,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final check = ref.watch(connectionControllerProvider);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final muted = context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant);
+    final parseOnDevice = ref.watch(parseOnDeviceProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -175,10 +176,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Privacy'),
-          Text(
-            'Statements go only to the importer address above. They reach a cloud '
-            'service only when the parser mode is "ai" or "both".',
-            style: muted,
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Read statements on this phone'),
+            subtitle: Text(
+              parseOnDevice
+                  ? "Statements stay on the phone. One the app can't read is sent to the "
+                        'backend only if you ask.'
+                  : 'Statements are sent to the importer address above. They reach a cloud '
+                        'service only when its parser mode is "ai" or "both".',
+              style: muted,
+            ),
+            value: parseOnDevice,
+            onChanged: (value) => setParseOnDevice(ref, value),
           ),
           const SizedBox(height: Space.lg),
           Align(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/banks.dart';
@@ -12,6 +13,8 @@ import '../../../data/models/parsed_transaction.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/inline_note.dart';
+import '../csv_export.dart';
 import '../widgets/import_result_sheet.dart';
 import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/transaction_row.dart';
@@ -43,6 +46,8 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   }
 
   Future<void> _loadCategories() async {
+    // Without an account there's no Actual to read categories from.
+    if (widget.args.account == null) return;
     try {
       final groups = await ref
           .read(importerApiProvider)
@@ -88,16 +93,39 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _updateTransaction(index, result);
   }
 
-  Future<void> _confirmImport() async {
+  /// Shares the selected lines as a CSV. Built in memory; the share sheet
+  /// may stage it in the app's cache to hand it over, and the app keeps no
+  /// copy of its own.
+  Future<void> _exportCsv() async {
     final included = _transactions.where((t) => t.include).toList();
     if (included.isEmpty) return;
+    final first = included.map((t) => t.date).reduce((a, b) => a.isBefore(b) ? a : b);
+    final last = included.map((t) => t.date).reduce((a, b) => a.isAfter(b) ? a : b);
+    final name = '${widget.args.parseResult.bankId}-${_day(first)}-to-${_day(last)}.csv';
+    _log.info('CSV exported', {'bank': widget.args.parseResult.bankId, 'transactions': included.length});
+    await SharePlus.instance.share(
+      ShareParams(
+        subject: 'Transactions',
+        files: [XFile.fromData(csvBytes(transactionsToCsv(included)), name: name, mimeType: 'text/csv')],
+        fileNameOverrides: [name],
+      ),
+    );
+  }
+
+  static String _day(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _confirmImport() async {
+    final account = widget.args.account;
+    final included = _transactions.where((t) => t.include).toList();
+    if (included.isEmpty || account == null) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Import ${included.length} transaction${included.length == 1 ? '' : 's'}?'),
         content: Text(
-          'They will be added to "${widget.args.account.name}". '
+          'They will be added to "${account.name}". '
           'Lines already in Actual are matched, not duplicated.',
         ),
         actions: [
@@ -109,18 +137,11 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     if (confirmed != true) return;
 
     setState(() => _importing = true);
-    _log.info('Import confirmed', {
-      'accountId': widget.args.account.id,
-      'transactions': included.length,
-    });
+    _log.info('Import confirmed', {'accountId': account.id, 'transactions': included.length});
     try {
       final result = await ref
           .read(importerApiProvider)
-          .confirmImport(
-            accountId: widget.args.account.id,
-            transactions: included,
-            budgetSyncId: widget.args.budgetSyncId,
-          );
+          .confirmImport(accountId: account.id, transactions: included, budgetSyncId: widget.args.budgetSyncId);
       if (!mounted) return;
       await showModalBottomSheet<void>(
         context: context,
@@ -180,14 +201,25 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     }
 
     final entries = _buildEntries();
+    final canImport = args.account != null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Review')),
+      appBar: AppBar(
+        title: const Text('Review'),
+        actions: [
+          if (canImport)
+            IconButton(
+              tooltip: 'Export CSV',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: count > 0 ? _exportCsv : null,
+            ),
+        ],
+      ),
       body: CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
             child: _ReviewHeader(
               bankName: bankDisplayName(args.parseResult.bankId),
-              accountName: args.account.name,
+              accountName: args.account?.name,
               totalCents: _totalCents,
               includedCount: count,
               totalCount: _transactions.length,
@@ -219,13 +251,29 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Space.gutter, Space.md, Space.gutter, Space.lg),
-            child: BusyButton(
-              label: count == 0
-                  ? 'Nothing selected'
-                  : 'Import $count transaction${count == 1 ? '' : 's'}',
-              busy: _importing,
-              onPressed: count > 0 ? _confirmImport : null,
-            ),
+            child: canImport
+                ? BusyButton(
+                    label: count == 0 ? 'Nothing selected' : 'Import $count transaction${count == 1 ? '' : 's'}',
+                    busy: _importing,
+                    onPressed: count > 0 ? _confirmImport : null,
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const InlineNote(
+                        message:
+                            'Connect Actual to import these. Until then you can export them as a CSV, '
+                            "which Actual's web app or a spreadsheet can open.",
+                      ),
+                      const SizedBox(height: Space.md),
+                      FilledButton.icon(
+                        onPressed: count > 0 ? _exportCsv : null,
+                        icon: const Icon(Icons.ios_share_rounded, size: 18),
+                        label: Text(count == 0 ? 'Nothing selected' : 'Export $count as CSV'),
+                      ),
+                    ],
+                  ),
           ),
         ),
       ),
@@ -243,7 +291,9 @@ class _ListEntry {
 
 class _ReviewHeader extends StatelessWidget {
   final String bankName;
-  final String accountName;
+
+  /// Null without an account to import into.
+  final String? accountName;
   final int totalCents;
   final int includedCount;
   final int totalCount;
@@ -268,7 +318,7 @@ class _ReviewHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$bankName statement into $accountName', style: muted),
+          Text(accountName == null ? '$bankName statement' : '$bankName statement into $accountName', style: muted),
           const SizedBox(height: Space.sm),
           Semantics(
             label: 'Net total of selected transactions',

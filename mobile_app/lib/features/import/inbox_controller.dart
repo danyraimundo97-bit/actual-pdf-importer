@@ -2,10 +2,15 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:statement_parser/statement_parser.dart' show StatementParseResult;
+
 import '../../core/errors/api_exception.dart';
 import '../../core/log/app_log.dart';
+import '../../data/category_suggestions.dart';
 import '../../data/models/import_result.dart';
 import '../../data/models/parse_result.dart';
+import '../../data/models/parsed_transaction.dart';
+import '../../data/pdf/pdf_text_extractor.dart';
 import '../../data/providers.dart';
 
 /// The backend rejects statements above this size; checking locally gives
@@ -14,7 +19,19 @@ const maxStatementBytes = 20 * 1024 * 1024;
 
 const _log = AppLog('import');
 
-enum InboxStatus { queued, parsing, needsPassword, ready, imported, failed }
+enum InboxStatus {
+  queued,
+  parsing,
+  needsPassword,
+
+  /// Read on the device, but no built-in parser recognised it (or it found
+  /// no movements). The backend's AI parser can try, if the user agrees to
+  /// send the PDF there: see [InboxController.sendToBackend].
+  unrecognized,
+  ready,
+  imported,
+  failed,
+}
 
 class InboxItem {
   final int id;
@@ -28,6 +45,18 @@ class InboxItem {
   /// True when the last password attempt was rejected.
   final bool wrongPassword;
 
+  /// The password that opened this PDF, kept (in memory only, like the
+  /// bytes) so sending it to the AI parser doesn't ask again.
+  final String? password;
+
+  /// For [InboxStatus.unrecognized]: the bank a built-in parser recognised
+  /// even though it found no movements, or null when none recognised it.
+  final String? recognizedBank;
+
+  /// True when [parseResult] came from the on-device parser, false when it
+  /// came from the backend.
+  final bool parsedOnDevice;
+
   const InboxItem({
     required this.id,
     required this.filename,
@@ -37,6 +66,9 @@ class InboxItem {
     this.importResult,
     this.error,
     this.wrongPassword = false,
+    this.password,
+    this.recognizedBank,
+    this.parsedOnDevice = false,
   });
 
   int get sizeBytes => bytes.length;
@@ -47,6 +79,9 @@ class InboxItem {
     ImportResult? importResult,
     String? error,
     bool? wrongPassword,
+    String? password,
+    String? recognizedBank,
+    bool? parsedOnDevice,
     bool clearError = false,
   }) {
     return InboxItem(
@@ -58,6 +93,9 @@ class InboxItem {
       importResult: importResult ?? this.importResult,
       error: clearError ? null : (error ?? this.error),
       wrongPassword: wrongPassword ?? this.wrongPassword,
+      password: password ?? this.password,
+      recognizedBank: recognizedBank ?? this.recognizedBank,
+      parsedOnDevice: parsedOnDevice ?? this.parsedOnDevice,
     );
   }
 }
@@ -66,6 +104,11 @@ class InboxItem {
 /// only: PDF bytes are never written to disk on the phone, matching the
 /// backend's memory-only upload handling. Parses one statement at a time,
 /// in the order they were added.
+///
+/// Statements are read on the device (docs/plans/dart-parser.md, Phase 5)
+/// unless the user turned that off in Settings. The PDF only goes to the
+/// backend when parsing there is the setting, or when the user asks for the
+/// AI parser on a statement the device couldn't read.
 class InboxController extends Notifier<List<InboxItem>> {
   int _nextId = 1;
   bool _pumping = false;
@@ -112,6 +155,16 @@ class InboxController extends Notifier<List<InboxItem>> {
     }
   }
 
+  /// Sends an [InboxStatus.unrecognized] statement to the backend's
+  /// parser (the AI parser, for a bank the device doesn't know). Explicit,
+  /// because the PDF leaves the phone.
+  void sendToBackend(int id) {
+    final item = _find(id);
+    if (item == null || item.status != InboxStatus.unrecognized) return;
+    _log.info('Statement sent to the backend parser', {'item': id});
+    _parseOnBackend(item, password: item.password);
+  }
+
   void markImported(int id, ImportResult result) {
     _log.info('Statement imported', {
       'item': id,
@@ -154,6 +207,97 @@ class InboxController extends Notifier<List<InboxItem>> {
   }
 
   Future<void> _parse(InboxItem item, {String? password}) async {
+    if (ref.read(parseOnDeviceProvider)) {
+      await _parseOnDevice(item, password: password);
+    } else {
+      await _parseOnBackend(item, password: password);
+    }
+  }
+
+  bool get _hasBackend => ref.read(appConfigProvider).backendUrl?.isNotEmpty ?? false;
+
+  Future<void> _parseOnDevice(InboxItem item, {String? password}) async {
+    _update(item.id, (i) => i.copyWith(status: InboxStatus.parsing, clearError: true));
+    try {
+      final local = await ref.read(localStatementReaderProvider).read(item.bytes, password: password);
+      if (!local.recognised || local.transactions.isEmpty) {
+        _log.info('Statement not recognised on device', {'item': item.id, 'bank': local.bankId});
+        _update(
+          item.id,
+          (i) => i.copyWith(
+            status: InboxStatus.unrecognized,
+            password: password,
+            recognizedBank: local.bankId,
+            wrongPassword: false,
+          ),
+        );
+        return;
+      }
+      final result = ParseResult(bankId: local.bankId!, transactions: await _withSuggestions(_fromLocal(local)));
+      _logParsed(item, result, onDevice: true);
+      _update(
+        item.id,
+        (i) => i.copyWith(
+          status: InboxStatus.ready,
+          parseResult: result,
+          parsedOnDevice: true,
+          password: password,
+          wrongPassword: false,
+        ),
+      );
+    } on PdfReadException catch (e) {
+      _log.warn('Statement not read on device', {'item': item.id, 'code': e.code});
+      switch (e.failure) {
+        case PdfReadFailure.passwordRequired || PdfReadFailure.passwordIncorrect:
+          _update(
+            item.id,
+            (i) => i.copyWith(
+              status: InboxStatus.needsPassword,
+              wrongPassword: e.failure == PdfReadFailure.passwordIncorrect,
+            ),
+          );
+        case PdfReadFailure.unreadable:
+          _update(
+            item.id,
+            (i) => i.copyWith(status: InboxStatus.failed, error: "This file isn't a PDF that can be read."),
+          );
+      }
+    } catch (e, st) {
+      _crashed(item, e, st);
+    }
+  }
+
+  static List<ParsedTransaction> _fromLocal(StatementParseResult local) => [
+    for (final t in local.transactions)
+      ParsedTransaction(
+        date: DateTime.parse(t.date),
+        payee: t.payee,
+        amountCents: t.amountCents,
+        rawLine: t.rawLine,
+        importedId: t.importedId,
+      ),
+  ];
+
+  /// Category suggestions from the backend's category memory, when there is
+  /// a backend and it answers. Only the mappings are fetched; the statement
+  /// stays on the device. Without a backend, transactions go to Review
+  /// uncategorised (until the on-device memory, Phase 4).
+  Future<List<ParsedTransaction>> _withSuggestions(List<ParsedTransaction> transactions) async {
+    if (!_hasBackend) return transactions;
+    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    try {
+      final api = ref.read(categoriesApiProvider);
+      final scoped = await api.list(budgetSyncId: budgetSyncId);
+      // GET /categories without a budget is the unscoped bucket.
+      final unscoped = budgetSyncId == null ? const <Never>[] : await api.list();
+      return applyCategoryMemory(transactions, scoped: scoped, unscoped: unscoped);
+    } on ApiException catch (e) {
+      _log.warn('Category memory unavailable; no suggestions', {'code': e.code, 'status': e.statusCode});
+      return transactions;
+    }
+  }
+
+  Future<void> _parseOnBackend(InboxItem item, {String? password}) async {
     _update(item.id, (i) => i.copyWith(status: InboxStatus.parsing, clearError: true));
     try {
       final result = await ref
@@ -164,27 +308,10 @@ class InboxController extends Notifier<List<InboxItem>> {
             password: password,
             budgetSyncId: ref.read(appConfigProvider).budgetSyncId,
           );
-      _log.info('Statement parsed', {
-        'item': item.id,
-        'bank': result.bankId,
-        'transactions': result.transactions.length,
-        'withSuggestion': result.transactions.where((t) => t.suggestedCategoryId != null).length,
-      });
-      if (Logs.debugEnabled) {
-        for (final (index, t) in result.transactions.indexed) {
-          _log.debug('Parsed transaction', {
-            'item': item.id,
-            'n': index,
-            'date': t.date.toIso8601String().substring(0, 10),
-            'payee': t.payee,
-            'importedId': t.importedId,
-            'categoryId': t.suggestedCategoryId,
-          });
-        }
-      }
+      _logParsed(item, result, onDevice: false);
       _update(
         item.id,
-        (i) => i.copyWith(status: InboxStatus.ready, parseResult: result, wrongPassword: false),
+        (i) => i.copyWith(status: InboxStatus.ready, parseResult: result, parsedOnDevice: false, wrongPassword: false),
       );
     } on ApiException catch (e) {
       _log.warn('Statement not parsed', {'item': item.id, 'code': e.code, 'status': e.statusCode});
@@ -205,17 +332,40 @@ class InboxController extends Notifier<List<InboxItem>> {
         _update(item.id, (i) => i.copyWith(status: InboxStatus.failed, error: message));
       }
     } catch (e, st) {
-      // A bug, not a backend answer: record it and fail this item instead
-      // of leaving it stuck on "parsing".
-      _log.error('Parsing a statement crashed', e, st, {'item': item.id});
-      _update(
-        item.id,
-        (i) => i.copyWith(
-          status: InboxStatus.failed,
-          error: 'Something went wrong. See Settings → Diagnostics.',
-        ),
-      );
+      _crashed(item, e, st);
     }
+  }
+
+  void _logParsed(InboxItem item, ParseResult result, {required bool onDevice}) {
+    _log.info('Statement parsed', {
+      'item': item.id,
+      'onDevice': onDevice,
+      'bank': result.bankId,
+      'transactions': result.transactions.length,
+      'withSuggestion': result.transactions.where((t) => t.suggestedCategoryId != null).length,
+    });
+    if (Logs.debugEnabled) {
+      for (final (index, t) in result.transactions.indexed) {
+        _log.debug('Parsed transaction', {
+          'item': item.id,
+          'n': index,
+          'date': t.date.toIso8601String().substring(0, 10),
+          'payee': t.payee,
+          'importedId': t.importedId,
+          'categoryId': t.suggestedCategoryId,
+        });
+      }
+    }
+  }
+
+  /// A bug, not a backend answer: record it and fail this item instead of
+  /// leaving it stuck on "parsing".
+  void _crashed(InboxItem item, Object e, StackTrace st) {
+    _log.error('Parsing a statement crashed', e, st, {'item': item.id});
+    _update(
+      item.id,
+      (i) => i.copyWith(status: InboxStatus.failed, error: 'Something went wrong. See Settings → Diagnostics.'),
+    );
   }
 }
 

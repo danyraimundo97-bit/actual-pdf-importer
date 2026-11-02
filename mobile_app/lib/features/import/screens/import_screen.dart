@@ -57,7 +57,17 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       _accountsError = null;
       _actualMissing = false;
     });
-    final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    final config = ref.read(appConfigProvider);
+    if (config.backendUrl?.isNotEmpty != true) {
+      // No backend (it's optional): nothing to import into, but statements
+      // are still read and reviewed on the phone.
+      setState(() {
+        _actualMissing = true;
+        _loadingAccounts = false;
+      });
+      return;
+    }
+    final budgetSyncId = config.budgetSyncId;
     try {
       final accounts = await ref.read(importerApiProvider).getAccounts(budgetSyncId: budgetSyncId);
       final openAccounts = accounts.where((a) => !a.closed).toList();
@@ -130,10 +140,36 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     }
   }
 
+  /// The one path where a statement leaves the phone while on-device
+  /// parsing is on, so it asks first.
+  Future<void> _sendToBackend(InboxItem item) async {
+    final backend = ref.read(backendConfigProvider).valueOrNull;
+    final cloud = backend != null && backend.usesAi
+        ? ' Your backend may forward it to ${backend.aiProvider ?? 'its AI provider'} to read it.'
+        : '';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Send this statement to your backend?'),
+        content: Text(
+          'The phone could not read "${item.filename}", so this sends the PDF to your importer '
+          'backend to try.$cloud It is not kept there.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
+        ],
+      ),
+    );
+    if (confirmed == true) ref.read(inboxProvider.notifier).sendToBackend(item.id);
+  }
+
   Future<void> _review(InboxItem item) async {
+    // No account (Actual not connected, no backend): Review still opens,
+    // for CSV export.
     final account = _selectedAccount;
     final parsed = item.parseResult;
-    if (account == null || parsed == null) return;
+    if (parsed == null) return;
     final config = ref.read(appConfigProvider);
     final result = await context.push<ImportResult>(
       '/review',
@@ -143,7 +179,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         budgetSyncId: config.budgetSyncId,
       ),
     );
-    if (result == null) return;
+    if (result == null || account == null) return;
     ref.read(inboxProvider.notifier).markImported(item.id, result);
     await ref.read(settingsStoreProvider).setLastAccountId(account.id);
     await ref
@@ -229,6 +265,8 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
     final budgetName = ref.watch(appConfigProvider).budgetName;
     final items = ref.watch(inboxProvider);
     final history = ref.watch(importHistoryProvider);
+    final parseOnDevice = ref.watch(parseOnDeviceProvider);
+    final hasBackend = ref.watch(appConfigProvider).backendUrl?.isNotEmpty ?? false;
     final hasFinished = items.any(
       (i) => i.status == InboxStatus.imported || i.status == InboxStatus.failed,
     );
@@ -248,7 +286,9 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
               ),
             ],
             const SizedBox(height: Space.xl),
-            if (backendConfig != null && backendConfig.usesAi) ...[
+            // With on-device parsing a statement reaches the AI provider only
+            // through the "Send to backend" confirmation, which says so itself.
+            if (backendConfig != null && backendConfig.usesAi && !parseOnDevice) ...[
               PrivacyBanner(providerName: backendConfig.aiProvider ?? 'an AI provider'),
               const SizedBox(height: Space.xl),
             ],
@@ -269,10 +309,11 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                   padding: const EdgeInsets.only(bottom: Space.sm),
                   child: _InboxTile(
                     item: item,
-                    canReview: _selectedAccount != null,
+                    canReview: !_loadingAccounts,
                     onReview: () => _review(item),
                     onUnlock: () => _unlock(item),
                     onRetry: () => ref.read(inboxProvider.notifier).retry(item.id),
+                    onSendToBackend: hasBackend ? () => _sendToBackend(item) : null,
                     onRemove: () => ref.read(inboxProvider.notifier).remove(item.id),
                   ),
                 ),
@@ -429,6 +470,10 @@ class _InboxTile extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onRemove;
 
+  /// Null without a backend: an unrecognised statement then has nowhere
+  /// else to go.
+  final VoidCallback? onSendToBackend;
+
   const _InboxTile({
     required this.item,
     required this.canReview,
@@ -436,6 +481,7 @@ class _InboxTile extends StatelessWidget {
     required this.onUnlock,
     required this.onRetry,
     required this.onRemove,
+    this.onSendToBackend,
   });
 
   @override
@@ -462,6 +508,17 @@ class _InboxTile extends StatelessWidget {
         Icon(Icons.lock_outline_rounded, color: colors.primary),
         item.wrongPassword ? 'Wrong password. Try again.' : 'Locked with a password',
         item.wrongPassword ? colors.error : colors.onSurfaceVariant,
+      ),
+      InboxStatus.unrecognized => (
+        Icon(Icons.help_outline_rounded, color: colors.onSurfaceVariant),
+        switch ((item.recognizedBank, onSendToBackend != null)) {
+          (final bank?, _) =>
+            'Looks like ${bankDisplayName(bank)}, but no transactions were found. '
+                'The statement layout may have changed.',
+          (null, true) => "This bank can't be read on the phone yet. Your backend's AI parser can try.",
+          (null, false) => "This bank can't be read on the phone yet.",
+        },
+        colors.onSurfaceVariant,
       ),
       InboxStatus.ready => (
         Icon(Icons.description_outlined, color: colors.primary),
@@ -499,6 +556,14 @@ class _InboxTile extends StatelessWidget {
         child: const Text('Unlock'),
       ),
       InboxStatus.failed => TextButton(onPressed: onRetry, child: const Text('Retry')),
+      InboxStatus.unrecognized when onSendToBackend != null => OutlinedButton(
+        onPressed: onSendToBackend,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        child: const Text('Send to backend'),
+      ),
       _ => null,
     };
 
