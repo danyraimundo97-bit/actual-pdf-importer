@@ -31,12 +31,15 @@ dependencies:
   receive_sharing_intent: ^1.8.0
 
   # Formatting
-  intl: ^0.19.0
+  intl: ^0.20.2
   fl_chart: ^1.2.0
 
   # Logging (lib/core/log): the on-device log files and "Share logs".
   path_provider: ^2.1.6
   share_plus: ^12.0.2
+  pdfrx: ^2.11.0
+  statement_parser:
+    path: packages/statement_parser
 
 dev_dependencies:
   flutter_test:

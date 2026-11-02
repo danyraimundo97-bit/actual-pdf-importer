@@ -11,6 +11,8 @@ import 'local/settings_store.dart';
 import 'models/backend_config.dart';
 import 'models/budget_month.dart';
 import 'models/dashboard.dart';
+import 'pdf/local_statement_reader.dart';
+import 'pdf/pdf_text_extractor.dart';
 
 /// Overridden in main() with the real instance obtained via
 /// SharedPreferences.getInstance() before runApp — reading this before
@@ -43,12 +45,7 @@ class AppConfig {
 
   const AppConfig({this.backendUrl, this.budgetSyncId, this.budgetName, this.onboarded = false});
 
-  AppConfig copyWith({
-    String? backendUrl,
-    String? budgetSyncId,
-    String? budgetName,
-    bool? onboarded,
-  }) {
+  AppConfig copyWith({String? backendUrl, String? budgetSyncId, String? budgetName, bool? onboarded}) {
     return AppConfig(
       backendUrl: backendUrl ?? this.backendUrl,
       budgetSyncId: budgetSyncId ?? this.budgetSyncId,
@@ -70,9 +67,7 @@ class AppConfigController extends StateNotifier<AppConfig> {
           // Installs from before the setup guide existed have no flag;
           // if they are already connected to a budget, don't send them
           // through the welcome screen again.
-          onboarded:
-              _store.onboarded ??
-              ((_store.backendUrl?.isNotEmpty ?? false) && _store.budgetSyncId != null),
+          onboarded: _store.onboarded ?? ((_store.backendUrl?.isNotEmpty ?? false) && _store.budgetSyncId != null),
         ),
       );
 
@@ -113,6 +108,14 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 
 final importerApiProvider = Provider<ImporterApi>((ref) {
   return ImporterApi(ref.watch(apiClientProvider));
+});
+
+/// On-device PDF reading (docs/plans/dart-parser.md, Phase 3). Tests
+/// override [pdfTextExtractorProvider] with a fake.
+final pdfTextExtractorProvider = Provider<PdfTextExtractor>((ref) => PdfrxTextExtractor());
+
+final localStatementReaderProvider = Provider<LocalStatementReader>((ref) {
+  return LocalStatementReader(ref.watch(pdfTextExtractorProvider));
 });
 
 final categoriesApiProvider = Provider<CategoriesApi>((ref) {
@@ -174,7 +177,6 @@ final importHistoryStoreProvider = Provider<ImportHistoryStore>((ref) {
   return ImportHistoryStore(ref.watch(sharedPreferencesProvider));
 });
 
-final importHistoryProvider =
-    StateNotifierProvider<ImportHistoryController, List<ImportHistoryEntry>>((ref) {
-      return ImportHistoryController(ref.watch(importHistoryStoreProvider));
-    });
+final importHistoryProvider = StateNotifierProvider<ImportHistoryController, List<ImportHistoryEntry>>((ref) {
+  return ImportHistoryController(ref.watch(importHistoryStoreProvider));
+});
