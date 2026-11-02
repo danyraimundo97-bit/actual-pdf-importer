@@ -40,11 +40,15 @@ dependencies:
   pdfrx: ^2.11.0
   statement_parser:
     path: packages/statement_parser
+  drift: ^2.35.3
+  drift_flutter: ^0.3.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  drift_dev: ^2.35.2
+  build_runner: ^2.17.1
 
 flutter:
   uses-material-design: true

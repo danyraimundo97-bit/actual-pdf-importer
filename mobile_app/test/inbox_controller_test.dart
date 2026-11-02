@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/native.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_app/core/errors/api_exception.dart';
 import 'package:mobile_app/data/api/categories_api.dart';
 import 'package:mobile_app/data/api/importer_api.dart';
+import 'package:mobile_app/data/local/db/app_database.dart';
 import 'package:mobile_app/data/models/category_mapping.dart';
 import 'package:mobile_app/data/models/import_result.dart';
 import 'package:mobile_app/data/models/parse_result.dart';
@@ -177,7 +180,8 @@ void main() {
     late ProviderContainer device;
     late _FakeCategoriesApi categories;
 
-    Future<void> start({String? backendUrl, bool categoriesFail = false}) async {
+    /// [actual]: the backend reports Actual connected with a budget.
+    Future<void> start({String? backendUrl, bool categoriesFail = false, bool actual = false}) async {
       SharedPreferences.setMockInitialValues({
         'backend_url': ?backendUrl,
         if (backendUrl != null) 'budget_sync_id': 'budget-1',
@@ -190,6 +194,12 @@ void main() {
           importerApiProvider.overrideWithValue(api),
           categoriesApiProvider.overrideWithValue(categories),
           pdfTextExtractorProvider.overrideWithValue(_FakeExtractor()),
+          appDatabaseProvider.overrideWith((ref) {
+            final db = AppDatabase(NativeDatabase.memory());
+            ref.onDispose(db.close);
+            return db;
+          }),
+          if (actual) linkStateProvider.overrideWith((ref) async => LinkState.ready),
         ],
       );
       addTearDown(device.dispose);
@@ -221,11 +231,11 @@ void main() {
       expect(only().parsedOnDevice, isTrue);
       expect(only().parseResult!.bankId, 'moey');
       expect(only().parseResult!.transactions, isNotEmpty);
-      expect(only().parseResult!.transactions.every((t) => t.suggestedCategoryId == null), isTrue);
+      expect(only().parseResult!.localCategories, isTrue);
     });
 
-    test("suggests categories from the backend's memory, budget first", () async {
-      await start(backendUrl: 'http://backend');
+    test("with Actual connected, suggests from the backend's memory, budget first", () async {
+      await start(backendUrl: 'http://backend', actual: true);
       deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
       await idle();
 
@@ -234,15 +244,31 @@ void main() {
       final txs = only().parseResult!.transactions;
       expect(txs.first.suggestedCategoryId, 'cat-1');
       expect(txs.skip(1).every((t) => t.suggestedCategoryId == null), isTrue);
+      expect(only().parseResult!.localCategories, isFalse);
+    });
+
+    test("without Actual, suggests from the phone's memory and never asks the backend", () async {
+      await start(backendUrl: 'http://backend');
+      final payee = _firstPayee.trim();
+      await device.read(localCategoryStoreProvider).remember(payee, 'preset:food.groceries');
+      deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
+      await idle();
+
+      expect(categories.scopes, isEmpty);
+      final first = only().parseResult!.transactions.first;
+      expect(first.suggestedCategoryId, 'preset:food.groceries');
+      expect(first.suggestedCategoryName, 'Groceries');
+      expect(first.suggestedFromHint, isFalse);
+      expect(only().parseResult!.localCategories, isTrue);
     });
 
     test('an unreachable backend still gives a reviewable statement', () async {
-      await start(backendUrl: 'http://backend', categoriesFail: true);
+      await start(backendUrl: 'http://backend', categoriesFail: true, actual: true);
       deviceInbox().add(filename: 'moey.pdf', bytes: _file(_DeviceFile.moey));
       await idle();
 
       expect(only().status, InboxStatus.ready);
-      expect(only().parseResult!.transactions.every((t) => t.suggestedCategoryId == null), isTrue);
+      expect(only().parseResult!.localCategories, isTrue, reason: "fell back to the phone's memory");
     });
 
     test('an unknown bank waits for the user before anything is uploaded', () async {

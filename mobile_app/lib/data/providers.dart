@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api/api_client.dart';
 import 'api/categories_api.dart';
 import 'api/importer_api.dart';
+import 'local/db/app_database.dart';
+import 'local/db/local_category_store.dart';
 import 'local/import_history_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
@@ -115,6 +117,18 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 
 final importerApiProvider = Provider<ImporterApi>((ref) {
   return ImporterApi(ref.watch(apiClientProvider));
+});
+
+/// The app's own database (categories, category memory). One per app run;
+/// tests override it with `AppDatabase(NativeDatabase.memory())`.
+final appDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(db.close);
+  return db;
+});
+
+final localCategoryStoreProvider = Provider<LocalCategoryStore>((ref) {
+  return LocalCategoryStore(ref.watch(appDatabaseProvider));
 });
 
 /// On-device PDF reading (docs/plans/dart-parser.md, Phase 3). Tests

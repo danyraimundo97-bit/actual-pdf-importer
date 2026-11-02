@@ -8,6 +8,7 @@ import '../../../core/format/banks.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local/db/local_category_store.dart';
 import '../../../data/models/actual_category.dart';
 import '../../../data/models/parsed_transaction.dart';
 import '../../../data/providers.dart';
@@ -41,13 +42,23 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   @override
   void initState() {
     super.initState();
-    _transactions = List.of(widget.args.parseResult.transactions);
+    final parsed = widget.args.parseResult;
+    // Read while Actual wasn't connected: those suggestions are the app's own
+    // categories, which Actual doesn't know (until "Match your categories",
+    // Phase 4c). Importing them would send ids Actual can't resolve.
+    _transactions = widget.args.account != null && parsed.localCategories
+        ? [for (final t in parsed.transactions) t.withoutSuggestion()]
+        : List.of(parsed.transactions);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadCategories());
   }
 
   Future<void> _loadCategories() async {
-    // Without an account there's no Actual to read categories from.
-    if (widget.args.account == null) return;
+    // Without an account there's no Actual: the app's own categories.
+    if (widget.args.account == null) {
+      final groups = await ref.read(localCategoryStoreProvider).groups();
+      if (mounted) setState(() => _categoryGroups = groups);
+      return;
+    }
     try {
       final groups = await ref
           .read(importerApiProvider)
@@ -103,6 +114,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     final last = included.map((t) => t.date).reduce((a, b) => a.isAfter(b) ? a : b);
     final name = '${widget.args.parseResult.bankId}-${_day(first)}-to-${_day(last)}.csv';
     _log.info('CSV exported', {'bank': widget.args.parseResult.bankId, 'transactions': included.length});
+    await _rememberLocally(included);
     await SharePlus.instance.share(
       ShareParams(
         subject: 'Transactions',
@@ -110,6 +122,25 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
         fileNameOverrides: [name],
       ),
     );
+  }
+
+  /// Exporting is this path's "import": like the backend does on import,
+  /// the phone remembers each category the user picked or accepted from a
+  /// hint, so the next statement suggests it.
+  Future<void> _rememberLocally(List<ParsedTransaction> included) async {
+    final store = ref.read(localCategoryStoreProvider);
+    var remembered = 0;
+    for (final t in included) {
+      final id = t.effectiveCategoryId;
+      if (id == null || !LocalCategoryStore.isLocalId(id)) continue;
+      if (t.overrideCategoryId == null && !t.showsHint) continue;
+      await store.remember(t.payee, id, budgetSyncId: widget.args.budgetSyncId);
+      remembered++;
+    }
+    if (remembered > 0) {
+      _log.info('Categories remembered on the phone', {'mappings': remembered});
+      ref.read(categoryMemoryRevisionProvider.notifier).state++;
+    }
   }
 
   static String _day(DateTime d) =>

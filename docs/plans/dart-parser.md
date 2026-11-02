@@ -307,6 +307,28 @@ Tests: seed + re-seed (rename survives an app update that adds a preset), lookup
 `payee_key` fixture, hint matching, auto-match normalisation, sync merge (newer wins, tombstones,
 unlinked rows held back), the picker with both sources.
 
+### Phase 4a as built (2026-11-02)
+
+Built in steps: 4a (this), 4b management screens, 4c "Match your categories", 4d sync and
+repopulate.
+
+- `drift` 2.35 (+ `drift_flutter`, generated `app_database.g.dart` committed).
+  `lib/data/local/db/app_database.dart` has the four tables as planned. Times are epoch ms.
+  Presets are seeded on every open by `presetKey`, so renames and hidden presets survive updates
+  and new presets get added. Preset ids are `preset:<key>`; user categories will be `local:<uuid>`.
+- `LocalCategoryStore`: visible groups (Income last, empty groups left out) in the picker's shape;
+  `suggest` = this budget's mapping, then unscoped, then a merchant hint; `remember`; `forget`
+  (tombstone); `mappings`.
+- `preset_hints.dart`: whole-word, case- and accent-insensitive (so `BPI` isn't `BP`).
+- Inbox: with Actual connected (`linkStateProvider` ready), suggestions come from the backend's
+  memory as before. Otherwise they come from the phone, and `ParseResult.localCategories` is true.
+- Review: no account → the picker lists the app's categories; a hint shows a "hint" badge; CSV
+  export remembers each picked or accepted-hint category on the phone. With an account, local
+  suggestions are dropped: Actual can't resolve local ids until 4c links them.
+- Not yet: web. `drift_flutter` on web needs `sqlite3.wasm` and `drift_worker.js` in `web/`; until
+  they're added the database won't open in a web build. Android, iOS and desktop bundle SQLite
+  through the sqlite3 build hook.
+
 ## Phase 5 — App integration
 
 In `features/import/inbox_controller.dart`, per queued PDF:

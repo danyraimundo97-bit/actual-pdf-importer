@@ -7,6 +7,7 @@ import 'package:statement_parser/statement_parser.dart' show StatementParseResul
 import '../../core/errors/api_exception.dart';
 import '../../core/log/app_log.dart';
 import '../../data/category_suggestions.dart';
+import '../../data/local/db/local_category_store.dart';
 import '../../data/models/import_result.dart';
 import '../../data/models/parse_result.dart';
 import '../../data/models/parsed_transaction.dart';
@@ -233,7 +234,12 @@ class InboxController extends Notifier<List<InboxItem>> {
         );
         return;
       }
-      final result = ParseResult(bankId: local.bankId!, transactions: await _withSuggestions(_fromLocal(local)));
+      final (transactions, localCategories) = await _withSuggestions(_fromLocal(local));
+      final result = ParseResult(
+        bankId: local.bankId!,
+        transactions: transactions,
+        localCategories: localCategories,
+      );
       _logParsed(item, result, onDevice: true);
       _update(
         item.id,
@@ -278,22 +284,57 @@ class InboxController extends Notifier<List<InboxItem>> {
       ),
   ];
 
-  /// Category suggestions from the backend's category memory, when there is
-  /// a backend and it answers. Only the mappings are fetched; the statement
-  /// stays on the device. Without a backend, transactions go to Review
-  /// uncategorised (until the on-device memory, Phase 4).
-  Future<List<ParsedTransaction>> _withSuggestions(List<ParsedTransaction> transactions) async {
-    if (!_hasBackend) return transactions;
+  /// Suggested categories, and whether they are the app's own (true) or
+  /// Actual's (false).
+  ///
+  /// With Actual connected: the backend's category memory, which holds
+  /// Actual's ids. Only the mappings are fetched; the statement stays on the
+  /// device. Otherwise (no backend, no Actual, or the backend doesn't
+  /// answer): the phone's own memory, then merchant hints, with the app's
+  /// predefined and user categories.
+  Future<(List<ParsedTransaction>, bool)> _withSuggestions(List<ParsedTransaction> transactions) async {
     final budgetSyncId = ref.read(appConfigProvider).budgetSyncId;
+    if (await _actualReady()) {
+      try {
+        final api = ref.read(categoriesApiProvider);
+        final scoped = await api.list(budgetSyncId: budgetSyncId);
+        // GET /categories without a budget is the unscoped bucket.
+        final unscoped = budgetSyncId == null ? const <Never>[] : await api.list();
+        return (applyCategoryMemory(transactions, scoped: scoped, unscoped: unscoped), false);
+      } on ApiException catch (e) {
+        _log.warn("Category memory unavailable; using the phone's", {'code': e.code, 'status': e.statusCode});
+      }
+    }
+    final store = ref.read(localCategoryStoreProvider);
+    return (
+      [
+        for (final t in transactions)
+          switch (await store.suggest(t.payee, budgetSyncId: budgetSyncId)) {
+            final s? => t.copyWith(
+              suggestedCategoryId: s.categoryId,
+              suggestedCategoryName: s.categoryName,
+              suggestedFromHint: s.source == SuggestionSource.hint,
+            ),
+            null => t,
+          },
+      ],
+      true,
+    );
+  }
+
+  /// Whether Actual is connected with a budget chosen. A backend that
+  /// doesn't answer counts as not connected.
+  Future<bool> _actualReady() async {
+    if (!_hasBackend) return false;
+    // Listened, not just read: the provider is autoDispose and would
+    // otherwise be torn down while its request is still running.
+    final link = ref.listen(linkStateProvider.future, (_, _) {});
     try {
-      final api = ref.read(categoriesApiProvider);
-      final scoped = await api.list(budgetSyncId: budgetSyncId);
-      // GET /categories without a budget is the unscoped bucket.
-      final unscoped = budgetSyncId == null ? const <Never>[] : await api.list();
-      return applyCategoryMemory(transactions, scoped: scoped, unscoped: unscoped);
-    } on ApiException catch (e) {
-      _log.warn('Category memory unavailable; no suggestions', {'code': e.code, 'status': e.statusCode});
-      return transactions;
+      return await link.read() == LinkState.ready;
+    } catch (_) {
+      return false;
+    } finally {
+      link.close();
     }
   }
 

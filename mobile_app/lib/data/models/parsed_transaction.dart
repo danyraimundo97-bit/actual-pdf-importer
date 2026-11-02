@@ -22,6 +22,10 @@ class ParsedTransaction {
   final String? suggestedCategoryId;
   final String? suggestedCategoryName;
 
+  /// The suggestion is a merchant hint (preset_hints.dart), not something
+  /// the user taught the app. Review marks it so the two can be told apart.
+  final bool suggestedFromHint;
+
   /// UI-only: whether this row is included in the import. Excluded rows
   /// are dropped before the request is built (see toConfirmJson callers).
   final bool include;
@@ -43,6 +47,7 @@ class ParsedTransaction {
     required this.importedId,
     this.suggestedCategoryId,
     this.suggestedCategoryName,
+    this.suggestedFromHint = false,
     this.include = true,
     this.overrideCategoryId,
     this.overrideCategoryName,
@@ -50,6 +55,22 @@ class ParsedTransaction {
   });
 
   String? get effectiveCategoryId => overrideCategoryId ?? suggestedCategoryId;
+
+  /// Showing the suggestion, and that suggestion is only a hint.
+  bool get showsHint => suggestedFromHint && overrideCategoryId == null && suggestedCategoryId != null;
+
+  /// The same line with no suggested category (copyWith can't set null).
+  ParsedTransaction withoutSuggestion() => ParsedTransaction(
+    date: date,
+    payee: payee,
+    amountCents: amountCents,
+    rawLine: rawLine,
+    importedId: importedId,
+    include: include,
+    overrideCategoryId: overrideCategoryId,
+    overrideCategoryName: overrideCategoryName,
+    edited: edited,
+  );
 
   String? get effectiveCategoryName =>
       overrideCategoryId != null ? overrideCategoryName : suggestedCategoryName;
@@ -86,6 +107,7 @@ class ParsedTransaction {
     String? importedId,
     String? suggestedCategoryId,
     String? suggestedCategoryName,
+    bool? suggestedFromHint,
     bool? include,
     String? overrideCategoryId,
     String? overrideCategoryName,
@@ -99,6 +121,7 @@ class ParsedTransaction {
       importedId: importedId ?? this.importedId,
       suggestedCategoryId: suggestedCategoryId ?? this.suggestedCategoryId,
       suggestedCategoryName: suggestedCategoryName ?? this.suggestedCategoryName,
+      suggestedFromHint: suggestedFromHint ?? this.suggestedFromHint,
       include: include ?? this.include,
       overrideCategoryId: overrideCategoryId ?? this.overrideCategoryId,
       overrideCategoryName: overrideCategoryName ?? this.overrideCategoryName,

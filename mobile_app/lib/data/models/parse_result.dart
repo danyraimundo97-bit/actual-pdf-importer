@@ -4,7 +4,12 @@ class ParseResult {
   final String bankId;
   final List<ParsedTransaction> transactions;
 
-  const ParseResult({required this.bankId, required this.transactions});
+  /// The suggested categories are the app's own (Actual wasn't connected
+  /// when the statement was read), not Actual's. They mustn't reach
+  /// `/import/confirm`: Review drops them when importing into Actual.
+  final bool localCategories;
+
+  const ParseResult({required this.bankId, required this.transactions, this.localCategories = false});
 
   factory ParseResult.fromJson(Map<String, dynamic> json) {
     final rawList = (json['transactions'] as List).cast<Map<String, dynamic>>();

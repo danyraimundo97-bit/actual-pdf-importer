@@ -1,8 +1,10 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mobile_app/data/local/db/app_database.dart';
 import 'package:mobile_app/data/models/actual_account.dart';
 import 'package:mobile_app/data/models/parse_result.dart';
 import 'package:mobile_app/data/models/parsed_transaction.dart';
@@ -62,7 +64,14 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [sharedPreferencesProvider.overrideWithValue(sp)],
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(sp),
+            appDatabaseProvider.overrideWith((ref) {
+              final db = AppDatabase(NativeDatabase.memory());
+              ref.onDispose(db.close);
+              return db;
+            }),
+          ],
           child: MaterialApp(
             home: ReviewScreen(
               args: ReviewScreenArgs(
@@ -82,6 +91,23 @@ void main() {
       expect(find.text('Export 2 as CSV'), findsOneWidget);
       expect(find.textContaining('Import'), findsNothing);
       expect(find.textContaining('Connect Actual to import'), findsOneWidget);
+    });
+
+    testWidgets("without an account the category picker offers the app's own categories", (tester) async {
+      await pumpReview(tester);
+      // Drift answers on a real future; let it, then settle the UI.
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('SHOP'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Uncategorized'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'food');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Groceries'), findsOneWidget);
+      expect(find.text('Restaurants & cafés'), findsOneWidget);
     });
   });
 }

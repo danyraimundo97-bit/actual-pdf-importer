@@ -60,7 +60,11 @@ class TransactionRow extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 2),
-                          _CategoryLine(name: categoryName, edited: transaction.edited),
+                          _CategoryLine(
+                            name: categoryName,
+                            edited: transaction.edited,
+                            hint: transaction.showsHint,
+                          ),
                         ],
                       ),
                     ),
@@ -88,7 +92,10 @@ class _CategoryLine extends StatelessWidget {
   final String? name;
   final bool edited;
 
-  const _CategoryLine({required this.name, required this.edited});
+  /// The category is a merchant hint, not the user's own memory.
+  final bool hint;
+
+  const _CategoryLine({required this.name, required this.edited, this.hint = false});
 
   @override
   Widget build(BuildContext context) {
@@ -110,6 +117,20 @@ class _CategoryLine extends StatelessWidget {
             ),
           ),
         ),
+        if (hint) ...[
+          const SizedBox(width: Space.sm),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: colors.secondaryContainer,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'hint',
+              style: context.text.labelSmall?.copyWith(color: colors.onSecondaryContainer),
+            ),
+          ),
+        ],
         if (edited) ...[
           const SizedBox(width: Space.sm),
           Icon(Icons.edit_outlined, size: 13, color: colors.onSurfaceVariant),
