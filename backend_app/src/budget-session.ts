@@ -1,4 +1,6 @@
 import type * as actualApi from '@actual-app/api';
+import type { Logger } from 'pino';
+import { logger } from './logger';
 
 /**
  * The backend's exclusive hold on Actual Budget (see CONTEXT.md, "Budget
@@ -68,7 +70,11 @@ export interface BudgetSession {
   shutdown(): Promise<void>;
 }
 
-export function createBudgetSession(serverConfig: ServerConfig, adapter: ActualAdapter): BudgetSession {
+export function createBudgetSession(
+  serverConfig: ServerConfig,
+  adapter: ActualAdapter,
+  log: Logger = logger.child({ area: 'session' }),
+): BudgetSession {
   let serverReady = false;
   let loadedSyncId: string | null = null;
   let tail: Promise<void> = Promise.resolve();
@@ -86,30 +92,47 @@ export function createBudgetSession(serverConfig: ServerConfig, adapter: ActualA
 
   /** One turn: server connection open, `budget` loaded if given, then `fn`. */
   function run<T>(budget: BudgetRef | undefined, fn: (port: ActualPort) => Promise<T>): Promise<T> {
+    const queuedAt = Date.now();
     return turn(async () => {
+      const startedAt = Date.now();
+      const budgetSyncId = budget?.syncId;
+      let action: 'none' | 'download' | 'sync' = 'none';
       if (!serverReady) {
         await adapter.init(serverConfig);
         serverReady = true;
+        log.info('Connected to the Actual server');
       }
       if (budget && loadedSyncId !== budget.syncId) {
         // If the download fails we can't tell which budget the SDK still
         // has open, so claim none: the next turn always re-downloads.
+        action = 'download';
         loadedSyncId = null;
         await adapter.downloadBudget(budget);
         loadedSyncId = budget.syncId;
+        log.info({ budgetSyncId, ms: Date.now() - startedAt }, 'Budget downloaded');
       } else if (budget) {
         // Already loaded, but possibly from long ago: without this, accounts
         // or transactions added in Actual since then stay invisible until a
         // restart, and import dedupe checks against stale data. A failed
         // sync leaves the copy's state unknown, so re-download next time.
+        action = 'sync';
         try {
           await adapter.sync();
         } catch (err) {
           loadedSyncId = null;
+          log.error({ budgetSyncId, err }, 'Sync with Actual failed');
           throw err;
         }
       }
-      return fn(adapter.port);
+      const prepMs = Date.now() - startedAt;
+      try {
+        return await fn(adapter.port);
+      } finally {
+        log.debug(
+          { budgetSyncId, action, waitMs: startedAt - queuedAt, prepMs, runMs: Date.now() - startedAt - prepMs },
+          'Turn finished',
+        );
+      }
     });
   }
 
@@ -123,6 +146,7 @@ export function createBudgetSession(serverConfig: ServerConfig, adapter: ActualA
         if (!serverReady) return;
         try {
           await adapter.shutdown();
+          log.info('Closed the Actual connection');
         } finally {
           serverReady = false;
           loadedSyncId = null;

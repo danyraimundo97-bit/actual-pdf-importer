@@ -16,6 +16,7 @@ export type ErrorCode =
   | 'NO_BUDGET_SELECTED'
   | 'BUDGET_NOT_FOUND'
   | 'UNAUTHORIZED'
+  | 'AUTH_REQUIRED'
   | 'TOO_MANY_FILES'
   | 'FILE_TOO_LARGE'
   | 'BATCH_TOO_LARGE'
@@ -36,6 +37,17 @@ export class ImporterError extends Error {
 export class UnrecognizedBankError extends ImporterError {
   constructor() {
     super('BANK_UNRECOGNIZED', 'Could not identify which bank this statement is from.', 422);
+  }
+}
+
+/**
+ * A route that hands out or changes something sensitive (e.g. GET /logs)
+ * while the backend runs with no IMPORT_TOKEN: refused outright, since
+ * anyone on the network could otherwise call it.
+ */
+export class AuthRequiredError extends ImporterError {
+  constructor() {
+    super('AUTH_REQUIRED', 'This needs IMPORT_TOKEN to be set on the backend.', 403);
   }
 }
 

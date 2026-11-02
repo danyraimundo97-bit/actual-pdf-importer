@@ -1,6 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from 'express';
 import multer from 'multer';
 import { BatchTooLargeError, FileTooLargeError, formatBytes, ImporterError, TooManyFilesError } from './errors';
+import { logger } from './logger';
 
 export interface UploadLimits {
   /** Per file. Generous for a bank statement, so a bad upload can't exhaust RAM. */
@@ -66,8 +67,9 @@ export function receiveFiles({
         stage === 'unread'
           ? 'an unknown number of file(s) (refused before reading)'
           : `${stage === 'aborted' ? 'at least ' : ''}${seenFiles} file(s)`;
-      console.warn(
-        `[upload] ${req.method} ${req.path} rejected with ${err.code}: received ${count}, ${size} in total ` +
+      logger.warn(
+        { area: 'upload', code: err.code },
+        `${req.method} ${req.path} rejected with ${err.code}: received ${count}, ${size} in total ` +
           `(limits: ${maxFiles} file(s), ${formatBytes(limits.maxFileBytes)} per file, ` +
           `${formatBytes(limits.maxTotalBytes)} per request)`,
       );

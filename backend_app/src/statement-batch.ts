@@ -1,4 +1,5 @@
 import { ErrorCode, ImporterError } from './errors';
+import { logger } from './logger';
 
 /**
  * Parsing several statements in one request.
@@ -68,7 +69,7 @@ export async function parseStatements<T>(
       }
       // Unexpected: log the real error, hand the client the same opaque
       // message a single-file parse would get. Never the stack.
-      console.error(`[batch] unexpected failure parsing "${filename}"`, err);
+      logger.error({ area: 'parser', file: filename, err }, 'Unexpected failure parsing a statement in a batch');
       results.push({
         filename,
         status: 'failed',

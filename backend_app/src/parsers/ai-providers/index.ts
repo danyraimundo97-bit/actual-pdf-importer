@@ -1,3 +1,4 @@
+import { logger } from '../../logger';
 import { AiProvider } from './types';
 import { AnthropicProvider } from './anthropic-provider';
 import { GeminiProvider } from './gemini-provider';
@@ -19,7 +20,7 @@ export function getAiProvider(): AiProvider {
   const factory = PROVIDER_FACTORIES[key];
 
   if (!factory) {
-    console.warn(`[ai-provider] Unknown AI_PROVIDER "${key}" — falling back to "anthropic".`);
+    logger.warn({ area: 'ai', provider: key }, 'Unknown AI_PROVIDER — falling back to "anthropic"');
     cached = PROVIDER_FACTORIES.anthropic();
   } else {
     cached = factory();

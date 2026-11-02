@@ -178,6 +178,7 @@ class DevScreen extends ConsumerWidget {
             runSpacing: Space.sm,
             children: [
               jump('Welcome', '/welcome'),
+              jump('Logs', '/settings/diagnostics'),
               for (var step = 0; step < 4; step++) jump('Setup ${step + 1}', '/setup?step=$step'),
               jump('Dashboard', '/dashboard', tab: true),
               jump('Import', '/import', tab: true),

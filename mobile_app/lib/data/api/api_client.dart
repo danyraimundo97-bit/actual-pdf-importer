@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../../core/log/http_log_interceptor.dart';
 import '../local/secret_store.dart';
 
 /// Turns what the user typed into a base URL Dio accepts on every platform,
@@ -48,5 +49,7 @@ class ApiClient {
         },
       ),
     );
+    // After the token interceptor, but it never logs headers either way.
+    dio.interceptors.add(HttpLogInterceptor());
   }
 }

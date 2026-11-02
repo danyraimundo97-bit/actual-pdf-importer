@@ -1,5 +1,8 @@
 import { BankParser, RawTransaction, parsePtAmountToCents, normalizePtDate } from '../types';
 import { scanMovementBlocks } from './statement-scanner';
+import { logger } from '../logger';
+
+const log = logger.child({ area: 'parser', bank: 'moey' });
 
 // Longer prefixes first: only the first matching prefix is stripped.
 const NOISE_PREFIXES = [
@@ -79,7 +82,8 @@ export const moeyParser: BankParser = {
       if (!match) {
         // Not a movement: a stray line, or a block whose amount/balance got
         // lost. Never silent — a dropped movement must be visible in the log.
-        console.warn(`[moey] skipping block with no amount/balance: "${block}"`);
+        // The block itself isn't logged: it carries amounts.
+        log.warn({ date: movementDate, lines: lines.length + 1 }, 'Skipped a block with no amount/balance');
         continue;
       }
 
@@ -95,7 +99,10 @@ export const moeyParser: BankParser = {
       } catch (err) {
         // parsePtAmountToCents/normalizePtDate rejected a value that matched
         // the shape — skip this movement rather than failing the import.
-        console.warn(`[moey] skipping unparseable block: "${block}" (${(err as Error).message})`);
+        log.warn(
+          { date: movementDate, payee: cleanPayee(description), reason: (err as Error).message.replace(/".*"/, '"…"') },
+          'Skipped an unparseable block',
+        );
       }
     }
 

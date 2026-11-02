@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
+import 'log/error_hooks.dart';
 import '../features/categories/screens/category_memory_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/dev/dev_screen.dart';
+import '../features/diagnostics/diagnostics_screen.dart';
 import '../features/import/screens/import_screen.dart';
 import '../features/review/screens/review_screen.dart';
 import '../features/review/screens/review_screen_args.dart';
@@ -30,6 +32,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/dashboard',
+    observers: [LogNavigatorObserver()],
     redirect: (context, state) {
       final onboarded = ref.read(appConfigProvider).onboarded;
       final location = state.matchedLocation;
@@ -71,7 +74,17 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(path: '/settings', builder: (context, state) => const SettingsScreen()),
+              GoRoute(
+                path: '/settings',
+                builder: (context, state) => const SettingsScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'diagnostics',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const DiagnosticsScreen(),
+                  ),
+                ],
+              ),
             ],
           ),
         ],

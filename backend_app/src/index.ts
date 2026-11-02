@@ -11,6 +11,9 @@ import { moeyParser } from './parsers/moey';
 import { tradeRepublicParser } from './parsers/traderepublic';
 import { aiParser, parseAiFromPdf } from './parsers/aiparser';
 import { getAiProvider } from './parsers/ai-providers';
+import { logger } from './logger';
+
+const log = logger.child({ area: 'parser' });
 
 export type ParserMode = 'regex' | 'ai' | 'both';
 
@@ -34,7 +37,7 @@ export type ParserMode = 'regex' | 'ai' | 'both';
 function resolveParserMode(): ParserMode {
   const raw = (process.env.PARSER_MODE ?? 'regex').trim().toLowerCase();
   if (raw === 'regex' || raw === 'ai' || raw === 'both') return raw;
-  console.warn(`[parsers] Unknown PARSER_MODE "${raw}" — falling back to "regex".`);
+  log.warn({ parserMode: raw }, 'Unknown PARSER_MODE — falling back to "regex"');
   return 'regex';
 }
 
@@ -69,14 +72,15 @@ if (PARSER_MODE === 'ai' || PARSER_MODE === 'both') {
     if (PARSER_MODE === 'ai') {
       throw new Error(message);
     }
-    console.warn(`[parsers] ${message} — the AI fallback will never trigger.`);
+    log.warn(`${message} — the AI fallback will never trigger.`);
   }
 }
 
-console.log(
+log.info(
+  { parserMode: PARSER_MODE, parsers: TEXT_PARSERS.map((p) => p.bankId) },
   PARSER_MODE === 'ai'
-    ? `[parsers] PARSER_MODE=ai — PDFs go straight to AI provider "${getAiProvider().name}", no local text extraction (unless a statement turns out to be password-protected).`
-    : `[parsers] PARSER_MODE=${PARSER_MODE} — active parsers: ${TEXT_PARSERS.map((p) => p.bankId).join(', ')}`,
+    ? `PARSER_MODE=ai — PDFs go straight to AI provider "${getAiProvider().name}", no local text extraction (unless a statement turns out to be password-protected).`
+    : `PARSER_MODE=${PARSER_MODE} — active parsers: ${TEXT_PARSERS.map((p) => p.bankId).join(', ')}`,
 );
 
 /**
@@ -91,9 +95,18 @@ export async function identifyAndParse(
 ): Promise<{ bankId: BankParser['bankId']; transactions: RawTransaction[] }> {
   for (const parser of TEXT_PARSERS) {
     if (parser.canParse(fullText)) {
-      return { bankId: parser.bankId, transactions: await parser.parse(fullText) };
+      const started = Date.now();
+      const transactions = await parser.parse(fullText);
+      log.debug(
+        { bank: parser.bankId, lines: fullText.split('\n').length, transactions: transactions.length, ms: Date.now() - started },
+        'Statement parsed',
+      );
+      transactions.forEach((tx, n) => log.debug({ bank: parser.bankId, n, date: tx.date, payee: tx.payee }, 'Parsed transaction'));
+      return { bankId: parser.bankId, transactions };
     }
+    log.debug({ bank: parser.bankId }, 'canParse: no match');
   }
+  log.debug({ lines: fullText.split('\n').length }, 'No parser recognized the statement');
   throw new UnrecognizedBankError();
 }
 

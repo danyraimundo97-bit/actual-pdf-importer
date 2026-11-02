@@ -21,6 +21,10 @@ services:
       # The payee -> category memory. THIS IS USER DATA: losing the volume
       # means re-teaching every category mapping.
       CATEGORY_DB_PATH: /data/categories.db
+      # Rotated log files (daily or 10 MB, 14 kept), read by the app's
+      # "Share logs" through GET /logs. Also on the volume, so they survive
+      # a container rebuild.
+      LOG_DIR: /data/logs
 
     volumes:
       - importer-data:/data
@@ -56,8 +60,9 @@ services:
       retries: 3
 
     logging:
-      # Statement contents are never logged, but parser warnings are — cap
-      # the log so a run of bad statements can't fill the disk.
+      # Docker's copy of stdout. Statement contents and amounts are never
+      # logged (see src/logger.ts); cap it so a run of bad statements can't
+      # fill the disk. The backend's own files are in LOG_DIR.
       driver: json-file
       options:
         max-size: "10m"

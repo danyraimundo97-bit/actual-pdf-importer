@@ -1,5 +1,8 @@
 import { BankParser, RawTransaction } from '../types';
 import { AiTransaction, getAiProvider } from './ai-providers';
+import { logger } from '../logger';
+
+const log = logger.child({ area: 'ai' });
 
 const MAX_CHARS = 60_000;
 
@@ -29,7 +32,13 @@ export const aiParser: BankParser = {
     }
 
     const text = fullText.length > MAX_CHARS ? fullText.slice(0, MAX_CHARS) : fullText;
+    const started = Date.now();
     const transactions = await provider.extractTransactionsFromText(text);
+    // Info, not debug: statement text left this machine for a cloud service.
+    log.info(
+      { provider: provider.name, input: 'text', chars: text.length, truncated: text.length < fullText.length, transactions: transactions.length, ms: Date.now() - started },
+      'Statement parsed by the AI provider',
+    );
     return transactions.map(toRawTransaction);
   },
 };
@@ -45,6 +54,11 @@ export async function parseAiFromPdf(pdfBuffer: Buffer): Promise<RawTransaction[
     throw new Error(`PARSER_MODE=ai but provider "${provider.name}" is not configured.`);
   }
 
+  const started = Date.now();
   const transactions = await provider.extractTransactionsFromPdf(pdfBuffer);
+  log.info(
+    { provider: provider.name, input: 'pdf', sizeKb: Math.round(pdfBuffer.length / 1024), transactions: transactions.length, ms: Date.now() - started },
+    'Statement parsed by the AI provider',
+  );
   return transactions.map(toRawTransaction);
 }

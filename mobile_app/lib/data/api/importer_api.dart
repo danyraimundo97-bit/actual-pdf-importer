@@ -169,6 +169,20 @@ class ImporterApi {
     return (removed: data['removed'] as int, skipped: data['skipped'] as int);
   }
 
+  /// GET /logs: the backend's most recent log lines, as text, for a log
+  /// report. Null if the backend can't provide them (unreachable, an older
+  /// backend without the route, or auth disabled there): a report must
+  /// still be shareable without them.
+  Future<String?> getBackendLogs({int tail = 500}) async {
+    try {
+      final res = await _dio.get('/logs', queryParameters: {'tail': tail});
+      final lines = res.data is Map ? res.data['lines'] : null;
+      return lines is List ? lines.join('\n') : null;
+    } on DioException {
+      return null;
+    }
+  }
+
   Future<Response<dynamic>> _guarded(Future<Response<dynamic>> Function() call) async {
     final Response<dynamic> res;
     try {

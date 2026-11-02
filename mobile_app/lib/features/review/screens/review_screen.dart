@@ -16,6 +16,9 @@ import '../widgets/import_result_sheet.dart';
 import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/transaction_row.dart';
 import 'review_screen_args.dart';
+import '../../../core/log/app_log.dart';
+
+const _log = AppLog('import');
 
 class ReviewScreen extends ConsumerStatefulWidget {
   final ReviewScreenArgs args;
@@ -106,6 +109,10 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     if (confirmed != true) return;
 
     setState(() => _importing = true);
+    _log.info('Import confirmed', {
+      'accountId': widget.args.account.id,
+      'transactions': included.length,
+    });
     try {
       final result = await ref
           .read(importerApiProvider)

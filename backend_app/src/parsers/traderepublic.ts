@@ -1,5 +1,8 @@
 import { BankParser, RawTransaction, parsePtAmountToCents } from '../types';
 import { scanMovementBlocks } from './statement-scanner';
+import { logger } from '../logger';
+
+const log = logger.child({ area: 'parser', bank: 'traderepublic' });
 
 // A movement spans several lines:
 //
@@ -119,13 +122,13 @@ export const tradeRepublicParser: BankParser = {
     }).flatMap((block): ScannedMovement[] => {
       const [yearLine, ...rest] = block.lines;
       if (!yearLine || !YEAR_LINE_RE.test(yearLine)) {
-        console.warn(`[traderepublic] no year line after "${block.dateLine}" — skipping`);
+        log.warn({ day: block.date[1], month: block.date[2] }, 'No year line after a date line — skipping');
         return [];
       }
       const body = rest.join(' ').replace(/\s+/g, ' ').trim();
       const tail = body.match(BALANCE_TAIL_RE);
       if (!tail) {
-        console.warn(`[traderepublic] no amount/balance found in "${body}"`);
+        log.warn({ day: block.date[1], month: block.date[2], year: yearLine }, 'No amount/balance found — skipping');
         return [];
       }
       const day = Number(block.date[1]);
@@ -146,7 +149,7 @@ export const tradeRepublicParser: BankParser = {
     // so a missing summary block costs one movement, not the statement.
     const anchor = text.match(OPENING_BALANCE_RE);
     if (!anchor) {
-      console.warn('[traderepublic] no SALDO INICIAL in the summary block — the first movement will be skipped');
+      log.warn('No SALDO INICIAL in the summary block — the first movement will be skipped');
     }
     let balance = anchor ? parsePtAmountToCents(anchor[1]) : scanned[0].balance;
     const resolvable = anchor ? scanned : scanned.slice(1);
@@ -158,9 +161,9 @@ export const tradeRepublicParser: BankParser = {
 
       const printed = formatCents(amountCents);
       if (!movement.head.endsWith(printed)) {
-        console.warn(
-          `[traderepublic] balance moved by ${amountCents} but "${printed}" is not printed at the ` +
-            `end of "${movement.head}" — skipping`,
+        log.warn(
+          { date: movement.date, payee: cleanPayee(stripType(movement.head)) },
+          'The balance change is not the amount printed on the line — skipping',
         );
         continue;
       }

@@ -1,5 +1,8 @@
 import { BankParser, RawTransaction } from '../types';
 import { MovementBlock, scanMovementBlocks } from './statement-scanner';
+import { logger } from '../logger';
+
+const log = logger.child({ area: 'parser', bank: 'activobank' });
 
 // ActivoBank prints the merchant name behind a transaction-type prefix.
 // Longer, more specific prefixes must come first: only the first matching
@@ -125,7 +128,7 @@ export const activoBankParser: BankParser = {
     if (!period) {
       // Without the period header there is no year anywhere in the table,
       // so nothing can be dated. Loud failure beats inventing a year.
-      console.warn('[activobank] no "EXTRATO DE yyyy/mm/dd A yyyy/mm/dd" period header — cannot date movements');
+      log.warn('No "EXTRATO DE yyyy/mm/dd A yyyy/mm/dd" period header — cannot date movements');
       return [];
     }
     const startYear = Number(period[1]);
@@ -133,13 +136,13 @@ export const activoBankParser: BankParser = {
 
     const opening = fullText.match(OPENING_BALANCE_RE);
     if (!opening) {
-      console.warn('[activobank] no readable SALDO INICIAL — movement direction cannot be resolved');
+      log.warn('No readable SALDO INICIAL — movement direction cannot be resolved');
       return [];
     }
     if ((fullText.match(/^SALDO INICIAL/gm) ?? []).length > 1) {
       // "EXTRATO COMBINADO" can carry several accounts. We only read the
       // first table; say so rather than importing a silent subset.
-      console.warn('[activobank] statement contains more than one account table — only the first was parsed');
+      log.warn('Statement contains more than one account table — only the first was parsed');
     }
 
     const blocks = scanMovementBlocks(fullText, {
@@ -185,7 +188,7 @@ function readMovement(
   balance: number,
 ): { balance: number; movement?: { description: string; amountCents: number } } | undefined {
   if (block.lines.length === 0) {
-    console.warn(`[activobank] date line with no movement body: "${block.dateLine}"`);
+    log.warn({ date: `${block.date[2]}/${block.date[1]}` }, 'Date line with no movement body');
     return undefined;
   }
   const glued = block.lines[block.lines.length - 1];
@@ -199,9 +202,11 @@ function readMovement(
     };
   }
 
-  console.warn(
-    `[activobank] could not resolve amount/balance in "${glued}" against balance ${balance} ` +
-      `(${resolved.length} arithmetic candidates) — skipping "${description}"`,
+  // The glued amount/balance text and the balance are never logged; the
+  // payee only reaches the log with LOG_DEBUG (see logger.ts).
+  log.warn(
+    { date: `${block.date[2]}/${block.date[1]}`, candidates: resolved.length, payee: description },
+    'Could not resolve amount/balance against the running balance — skipping',
   );
   const candidates = splitCandidates(glued);
   return candidates.length === 1 ? { balance: candidates[0].balance } : undefined;

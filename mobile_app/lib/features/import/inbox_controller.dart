@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/log/app_log.dart';
 import '../../data/models/import_result.dart';
 import '../../data/models/parse_result.dart';
 import '../../data/providers.dart';
@@ -10,6 +11,8 @@ import '../../data/providers.dart';
 /// The backend rejects statements above this size; checking locally gives
 /// an immediate, specific error instead of a failed upload.
 const maxStatementBytes = 20 * 1024 * 1024;
+
+const _log = AppLog('import');
 
 enum InboxStatus { queued, parsing, needsPassword, ready, imported, failed }
 
@@ -72,9 +75,15 @@ class InboxController extends Notifier<List<InboxItem>> {
 
   void add({required String filename, required Uint8List bytes}) {
     final item = InboxItem(id: _nextId++, filename: filename, bytes: bytes);
+    final tooLarge = bytes.length > maxStatementBytes;
+    if (tooLarge) {
+      _log.warn('Statement rejected: too large', {'item': item.id, 'sizeKb': bytes.length ~/ 1024});
+    } else {
+      _log.info('Statement queued', {'item': item.id, 'sizeKb': bytes.length ~/ 1024});
+    }
     state = [
       ...state,
-      bytes.length > maxStatementBytes
+      tooLarge
           ? item.copyWith(
               status: InboxStatus.failed,
               error: 'Larger than 20 MB, which is the most the importer accepts.',
@@ -104,6 +113,12 @@ class InboxController extends Notifier<List<InboxItem>> {
   }
 
   void markImported(int id, ImportResult result) {
+    _log.info('Statement imported', {
+      'item': id,
+      'added': result.added,
+      'updated': result.updated,
+      'categorized': result.categorized,
+    });
     _update(id, (i) => i.copyWith(status: InboxStatus.imported, importResult: result));
   }
 
@@ -149,11 +164,30 @@ class InboxController extends Notifier<List<InboxItem>> {
             password: password,
             budgetSyncId: ref.read(appConfigProvider).budgetSyncId,
           );
+      _log.info('Statement parsed', {
+        'item': item.id,
+        'bank': result.bankId,
+        'transactions': result.transactions.length,
+        'withSuggestion': result.transactions.where((t) => t.suggestedCategoryId != null).length,
+      });
+      if (Logs.debugEnabled) {
+        for (final (index, t) in result.transactions.indexed) {
+          _log.debug('Parsed transaction', {
+            'item': item.id,
+            'n': index,
+            'date': t.date.toIso8601String().substring(0, 10),
+            'payee': t.payee,
+            'importedId': t.importedId,
+            'categoryId': t.suggestedCategoryId,
+          });
+        }
+      }
       _update(
         item.id,
         (i) => i.copyWith(status: InboxStatus.ready, parseResult: result, wrongPassword: false),
       );
     } on ApiException catch (e) {
+      _log.warn('Statement not parsed', {'item': item.id, 'code': e.code, 'status': e.statusCode});
       if (e.code == 'PDF_PASSWORD_REQUIRED' || e.code == 'PDF_PASSWORD_INCORRECT') {
         _update(
           item.id,
@@ -170,6 +204,17 @@ class InboxController extends Notifier<List<InboxItem>> {
         };
         _update(item.id, (i) => i.copyWith(status: InboxStatus.failed, error: message));
       }
+    } catch (e, st) {
+      // A bug, not a backend answer: record it and fail this item instead
+      // of leaving it stuck on "parsing".
+      _log.error('Parsing a statement crashed', e, st, {'item': item.id});
+      _update(
+        item.id,
+        (i) => i.copyWith(
+          status: InboxStatus.failed,
+          error: 'Something went wrong. See Settings → Diagnostics.',
+        ),
+      );
     }
   }
 }

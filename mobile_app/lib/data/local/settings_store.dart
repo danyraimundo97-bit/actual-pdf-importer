@@ -8,6 +8,7 @@ class SettingsStore {
   static const _kBudgetName = 'budget_name';
   static const _kLastAccountId = 'last_account_id';
   static const _kOnboarded = 'onboarded';
+  static const _kDebugLogging = 'debug_logging';
 
   final SharedPreferences _prefs;
 
@@ -29,6 +30,11 @@ class SettingsStore {
   /// derives a value from the connection settings in that case.
   bool? get onboarded => _prefs.getBool(_kOnboarded);
   Future<void> setOnboarded(bool value) => _prefs.setBool(_kOnboarded, value);
+
+  /// The user's "Verbose logging" choice; null = the build's default
+  /// (`--dart-define=LOG_DEBUG`).
+  bool? get debugLogging => _prefs.getBool(_kDebugLogging);
+  Future<void> setDebugLogging(bool value) => _prefs.setBool(_kDebugLogging, value);
 
   Future<void> clear() => _prefs.clear();
 }

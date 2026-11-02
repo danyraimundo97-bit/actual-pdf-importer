@@ -19,6 +19,9 @@ import '../../../shared/widgets/sheet_body.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../review/screens/review_screen_args.dart';
 import '../inbox_controller.dart';
+import '../../../core/log/app_log.dart';
+
+const _log = AppLog('import');
 
 /// The Import tab: an inbox of statements. PDFs are added by picking (one
 /// or several) or by sharing them from another app (see AppShell); each is
@@ -191,6 +194,11 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             transactionIds: entry.addedIds,
             budgetSyncId: entry.budgetSyncId,
           );
+      _log.info('Import removed', {
+        'accountId': entry.accountId,
+        'removed': outcome.removed,
+        'skipped': outcome.skipped,
+      });
       await ref.read(importHistoryProvider.notifier).markUndone(entry);
       ref.invalidate(dashboardProvider);
       if (!mounted) return;

@@ -2,7 +2,9 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
 import { processStatement, PARSER_MODE } from './index';
-import { ImporterError, NoBudgetSelectedError } from './errors';
+import { AuthRequiredError, ImporterError, NoBudgetSelectedError } from './errors';
+import { debugFromEnv, initLogFile, logDir, logger, readRecentLogLines } from './logger';
+import { requestLog, requestLogger } from './request-log';
 import { receiveFiles } from './upload';
 import { recordRemovals } from './removal-log';
 import { parseStatements, summarize } from './statement-batch';
@@ -27,7 +29,11 @@ import {
   rememberCategory,
 } from './categorydb';
 
+const log = logger.child({ area: 'app' });
+
 const app = express();
+// First, so every request (rejected ones included) gets an id and a log line.
+app.use(requestLogger());
 app.use(express.json());
 
 // Server credentials never vary per request, so they're fixed when the
@@ -68,13 +74,21 @@ function resolveBudgetRef(budgetSyncId?: unknown, budgetPassword?: unknown): Bud
   };
 }
 
+/**
+ * Maps an error to its JSON response. Expected failures (a typed
+ * ImporterError) are logged at warn with their code; anything else is a
+ * bug, logged at error with its stack. Both responses carry the request id,
+ * so a failure the user sees can be found in this log.
+ */
 function sendImporterError(res: Response, err: unknown, fallbackMessage: string): void {
+  const requestId = res.locals.requestId as string | undefined;
   if (err instanceof ImporterError) {
-    res.status(err.status).json({ error: err.message, code: err.code });
+    requestLog(res).warn({ code: err.code, status: err.status }, err.message);
+    res.status(err.status).json({ error: err.message, code: err.code, requestId });
     return;
   }
-  console.error(fallbackMessage, err);
-  res.status(500).json({ error: fallbackMessage, code: 'INTERNAL_ERROR' });
+  requestLog(res).error({ err }, fallbackMessage);
+  res.status(500).json({ error: fallbackMessage, code: 'INTERNAL_ERROR', requestId });
 }
 
 // --- Auth ------------------------------------------------------------------
@@ -86,8 +100,9 @@ function sendImporterError(res: Response, err: unknown, fallbackMessage: string)
 
 const IMPORT_TOKEN = process.env.IMPORT_TOKEN;
 if (!IMPORT_TOKEN) {
-  console.warn(
-    '[auth] IMPORT_TOKEN is not set — running with NO authentication. ' +
+  logger.warn(
+    { area: 'auth' },
+    'IMPORT_TOKEN is not set — running with NO authentication. ' +
       'Anyone who can reach this port can read/write your budget. Set IMPORT_TOKEN in .env to require the X-Import-Token header.',
   );
 }
@@ -102,6 +117,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
 
   if (!ok) {
+    // The address only: never what was sent as the token.
+    requestLog(res).warn({ ip: req.ip, tokenSent: provided.length > 0 }, 'Rejected: missing or invalid token');
     return res.status(401).json({ error: 'Missing or invalid X-Import-Token header.', code: 'UNAUTHORIZED' });
   }
   return next();
@@ -142,8 +159,13 @@ function readPassword(body: Record<string, unknown>): string | undefined {
  */
 async function parseAndEnrich(buffer: Buffer, password: string | undefined, budgetScope: string) {
   const { bankId, transactions } = await processStatement(buffer, password);
+  const lookupLog = logger.child({ area: 'categories' });
   const enriched = assignImportedIds(transactions).map((tx) => {
     const match = lookupCategory(tx.payee, budgetScope);
+    lookupLog.debug(
+      { payee: tx.payee, scope: budgetScope || '(unscoped)', hit: Boolean(match), categoryId: match?.categoryId, importedId: tx.importedId },
+      'Category lookup',
+    );
     return {
       ...tx,
       suggestedCategoryId: match?.categoryId,
@@ -234,6 +256,10 @@ app.post('/import/confirm', async (req: Request, res: Response) => {
       accountId,
       transactions,
     );
+    requestLog(res).info(
+      { accountId, sent: transactions.length, added: result.added, updated: result.updated, categorized: result.categorized },
+      'Import confirmed',
+    );
     return res.json(result);
   } catch (err) {
     sendImporterError(res, err, 'Internal error while importing to Actual.');
@@ -272,6 +298,7 @@ app.post('/import/undo', async (req: Request, res: Response) => {
     const { removed, skipped, softDeleted } = await undoImport(budgetSession, budget, accountId, transactionIds);
     const removedAt = new Date().toISOString();
     recordRemovals(softDeleted.map((t) => ({ ...t, budgetSyncId: budget.syncId, accountId, removedAt })));
+    requestLog(res).info({ accountId, removed, skipped }, 'Import removed (soft delete)');
     return res.json({ removed, skipped });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while undoing the import.');
@@ -434,6 +461,22 @@ app.post('/categories/learn-from-actual', async (req: Request, res: Response) =>
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+/**
+ * The most recent backend log lines (JSON, one per entry), for the app's
+ * "Share logs". Query: tail (default 500, max 5000), level (debug|info|warn|error).
+ * Refused when auth is disabled: logs describe the user's activity.
+ */
+app.get('/logs', (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    const tail = Math.min(Math.max(Number(req.query.tail) || 500, 1), 5000);
+    const level = typeof req.query.level === 'string' ? req.query.level : undefined;
+    return res.json({ lines: readRecentLogLines(logDir(), tail, level) });
+  } catch (err) {
+    sendImporterError(res, err, 'Could not read the logs.');
+  }
+});
+
 // --- Error handling ----------------------------------------------------
 //
 // Registered last, so it sees anything the routes threw — including the
@@ -450,13 +493,27 @@ app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
 // error response, so dropping the duplicate is safe. Anything else is still
 // rethrown, keeping Node's default of crashing on a genuine unhandled bug.
 process.on('unhandledRejection', (reason) => {
-  if (isHandledSdkError(reason)) return;
+  if (isHandledSdkError(reason)) {
+    logger.debug({ area: 'actual', err: reason }, 'Dropped a duplicate error from @actual-app/api');
+    return;
+  }
   throw reason;
+});
+
+// Last stop for a genuine bug: record it with its stack, flush, then exit as
+// Node would have (a process in an unknown state shouldn't keep serving).
+process.on('uncaughtException', (err) => {
+  logger.fatal({ area: 'app', err }, 'Uncaught exception — exiting');
+  logger.flush();
+  setTimeout(() => process.exit(1), 100).unref();
 });
 
 const PORT = process.env.PORT ?? 3000;
 const server = app.listen(PORT, () => {
-  console.log(`PDF importer backend listening on port ${PORT}`);
+  log.info({ port: Number(PORT), debugLogging: debugFromEnv() }, `PDF importer backend listening on port ${PORT}`);
+});
+void initLogFile().then((dir) => {
+  if (dir) log.info({ dir }, 'Writing log files');
 });
 
 // Actual's API keeps a local sqlite cache open; shut it down cleanly so it
@@ -471,13 +528,13 @@ let shuttingDown = false;
 async function shutdownGracefully(signal: string) {
   if (shuttingDown) process.exit(1);
   shuttingDown = true;
-  console.log(`
-[server] ${signal} received — closing the Actual connection...`);
+  log.info({ signal }, 'Shutting down — closing the Actual connection');
   try {
     await budgetSession.shutdown();
   } catch (err) {
-    console.error('Error while shutting down the Actual connection:', err);
+    log.error({ err }, 'Error while shutting down the Actual connection');
   }
+  logger.flush();
   server.close(() => process.exit(0));
 }
 

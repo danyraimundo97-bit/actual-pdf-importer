@@ -8,6 +8,7 @@ import '../../data/models/actual_budget.dart';
 import '../../data/models/backend_config.dart';
 import '../../data/providers.dart';
 import '../../shared/widgets/labeled_field.dart';
+import '../../core/log/app_log.dart';
 
 enum ConnectionStatus { idle, testing, connected, failed }
 
@@ -92,6 +93,7 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
     try {
       final health = await api.health();
       if (health != HealthStatus.ok) {
+        _log.warn('Connection test failed', {'health': health.name});
         state = state.copyWith(
           status: ConnectionStatus.failed,
           message: health == HealthStatus.notImporter
@@ -102,6 +104,7 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
         return false;
       }
       final config = await api.getConfig();
+      _log.info('Connection test passed', {'parserMode': config.parserMode, 'ai': config.usesAi});
       state = state.copyWith(
         status: ConnectionStatus.connected,
         config: config,
@@ -111,6 +114,7 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
       );
       return true;
     } on ApiException catch (e) {
+      _log.warn('Connection test failed', {'code': e.code, 'status': e.statusCode});
       state = state.copyWith(
         status: ConnectionStatus.failed,
         message: e.isUnauthorized
@@ -125,6 +129,7 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
     state = state.copyWith(loadingBudgets: true, clearBudgetsError: true);
     try {
       final budgets = await ref.read(importerApiProvider).getBudgets();
+      _log.info('Budgets loaded', {'count': budgets.length});
       state = state.copyWith(budgets: budgets, loadingBudgets: false);
     } on ApiException catch (e) {
       state = state.copyWith(loadingBudgets: false, budgetsError: e.message);
@@ -138,8 +143,11 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
       await ref.read(secretStoreProvider).setBudgetPassword(budget.syncId, password);
     }
     await ref.read(appConfigProvider.notifier).setBudget(budget.syncId, budget.name);
+    _log.info('Budget selected', {'budgetSyncId': budget.syncId, 'encrypted': password != null});
   }
 }
+
+const _log = AppLog('connection');
 
 final connectionControllerProvider =
     AutoDisposeNotifierProvider<ConnectionController, ConnectionCheck>(ConnectionController.new);

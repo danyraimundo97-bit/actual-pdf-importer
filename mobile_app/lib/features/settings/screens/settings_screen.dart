@@ -147,6 +147,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
           const SizedBox(height: Space.xxl + Space.sm),
+          const _SectionTitle('Diagnostics'),
+          Text('Logs of what the app did, to find out what went wrong.', style: muted),
+          const SizedBox(height: Space.lg),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push('/settings/diagnostics'),
+              icon: const Icon(Icons.receipt_long_outlined, size: 18),
+              label: const Text('Logs and diagnostics'),
+            ),
+          ),
+          const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Setup guide'),
           Text('Walk through connecting and choosing a budget again.', style: muted),
           const SizedBox(height: Space.lg),

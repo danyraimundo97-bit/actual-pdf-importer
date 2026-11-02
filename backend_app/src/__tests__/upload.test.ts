@@ -5,6 +5,7 @@ import { Server } from 'node:http';
 import express, { NextFunction, Request, Response } from 'express';
 import { ImporterError } from '../errors';
 import { receiveFiles, UploadLimits } from '../upload';
+import { logger } from '../logger';
 
 // Small limits so the tests can cross them with a few bytes.
 const LIMITS: UploadLimits = { maxFileBytes: 1000, maxTotalBytes: 2500 };
@@ -39,7 +40,7 @@ after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
 beforeEach(() => {
   warnings = [];
-  mock.method(console, 'warn', (msg: string) => warnings.push(msg));
+  mock.method(logger, 'warn', (_fields: unknown, msg: string) => warnings.push(msg));
 });
 
 async function send(path: string, field: string, sizes: number[]) {
