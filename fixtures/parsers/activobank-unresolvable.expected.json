@@ -1,0 +1,6 @@
+{
+  "bankId": "activobank",
+  "transactions": [
+    { "date": "2026-07-02", "payee": "LOJA SEGUINTE", "amountCents": -1000 }
+  ]
+}

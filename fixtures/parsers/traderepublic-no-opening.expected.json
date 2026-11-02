@@ -1,0 +1,6 @@
+{
+  "bankId": "traderepublic",
+  "transactions": [
+    { "date": "2026-08-02", "payee": "LOJA SEGUNDA", "amountCents": -4000 }
+  ]
+}

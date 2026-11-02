@@ -1,0 +1,12 @@
+{
+  "bankId": "moey",
+  "transactions": [
+    { "date": "2026-07-01", "payee": "MERCADO TESTE", "amountCents": -260 },
+    { "date": "2026-07-02", "payee": "JOANA EXEMPLO", "amountCents": 2000 },
+    { "date": "2026-07-03", "payee": "OP BX VALOR 03 TRAN", "amountCents": -101780 },
+    { "date": "2026-07-04", "payee": "PESSOA TESTE", "amountCents": 566 },
+    { "date": "2026-07-04", "payee": "MARIA FICTICIA SILVA SANTOS", "amountCents": -13000 },
+    { "date": "2026-07-05", "payee": "ANTONIO INVENTADO COSTA", "amountCents": -1200 },
+    { "date": "2026-07-06", "payee": "OUTRA PESSOA", "amountCents": -1000 }
+  ]
+}

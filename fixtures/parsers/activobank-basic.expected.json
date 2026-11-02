@@ -1,0 +1,11 @@
+{
+  "bankId": "activobank",
+  "transactions": [
+    { "date": "2026-07-01", "payee": "LOJA TESTE", "amountCents": -2550 },
+    { "date": "2026-07-03", "payee": "PESSOA TESTE", "amountCents": -1000 },
+    { "date": "2026-07-05", "payee": "EMPRESA TESTE", "amountCents": -6450 },
+    { "date": "2026-07-10", "payee": "SALARIO", "amountCents": 120000 },
+    { "date": "2026-07-15", "payee": "MERCADO MUITO GRANDE LDA", "amountCents": -10000 },
+    { "date": "2026-07-20", "payee": "OUTRA PESSOA", "amountCents": -50000 }
+  ]
+}

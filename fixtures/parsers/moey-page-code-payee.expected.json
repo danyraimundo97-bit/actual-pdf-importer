@@ -1,0 +1,7 @@
+{
+  "bankId": "moey",
+  "transactions": [
+    { "date": "2026-07-02", "payee": "MERCADO A", "amountCents": -500 },
+    { "date": "2026-07-03", "payee": "MERCADO B", "amountCents": -700 }
+  ]
+}

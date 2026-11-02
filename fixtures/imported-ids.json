@@ -1,0 +1,63 @@
+{
+  "_comment": "Golden importedIds. Copied from backend_app/src/__tests__/actual.test.ts, which keeps them as literals too. These are what every past import was deduped with: if any of them moves, re-importing an old statement duplicates it. Never regenerate this file from the implementation.",
+  "cases": [
+    {
+      "name": "one movement",
+      "transactions": [
+        {
+          "date": "2026-03-01",
+          "payee": "OTHER",
+          "amountCents": -1234
+        }
+      ],
+      "importedIds": [
+        "pdfimport--1836610009"
+      ]
+    },
+    {
+      "name": "three repeats of one basis on one day",
+      "transactions": [
+        {
+          "date": "2026-07-13",
+          "payee": "JOANA EXEMPL",
+          "amountCents": 1000
+        },
+        {
+          "date": "2026-07-13",
+          "payee": "JOANA EXEMPL",
+          "amountCents": 1000
+        },
+        {
+          "date": "2026-07-13",
+          "payee": "JOANA EXEMPL",
+          "amountCents": 1000
+        }
+      ],
+      "importedIds": [
+        "pdfimport-747927590",
+        "pdfimport--779377660",
+        "pdfimport--779377659"
+      ]
+    },
+    {
+      "name": "accents, euro sign and a surrogate pair (hashed per UTF-16 code unit)",
+      "_source": "computed by the backend's assignImportedIds on 2026-11-02, to pin the Dart port to the same code units",
+      "transactions": [
+        {
+          "date": "2026-08-03",
+          "payee": "CAFÉ AÇORIANA",
+          "amountCents": -450
+        },
+        {
+          "date": "2026-08-04",
+          "payee": "Transferência €uro 🙂",
+          "amountCents": 12345
+        }
+      ],
+      "importedIds": [
+        "pdfimport--1481035912",
+        "pdfimport--1538501564"
+      ]
+    }
+  ]
+}

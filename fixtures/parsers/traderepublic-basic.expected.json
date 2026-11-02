@@ -1,0 +1,9 @@
+{
+  "bankId": "traderepublic",
+  "transactions": [
+    { "date": "2026-08-01", "payee": "Interest payment", "amountCents": 500 },
+    { "date": "2026-08-03", "payee": "LOJA TESTE 4", "amountCents": -1000 },
+    { "date": "2026-08-05", "payee": "PESSOA TESTE", "amountCents": 114500 },
+    { "date": "2026-08-10", "payee": "MERCADO TESTE", "amountCents": -6550 }
+  ]
+}

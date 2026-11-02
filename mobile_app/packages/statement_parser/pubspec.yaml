@@ -1,0 +1,11 @@
+name: statement_parser
+description: Reads bank statement text (ActivoBank, moey, Trade Republic) into transactions. Pure Dart, a port of backend_app/src/parsers.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.9.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
