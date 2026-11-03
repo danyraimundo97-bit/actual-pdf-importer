@@ -57,7 +57,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   Future<void> _loadCategories() async {
     // Without an account there's no Actual: the app's own categories.
     if (widget.args.account == null) {
-      final groups = await ref.read(localCategoryStoreProvider).groups();
+      final groups = await ref.read(localCategoryStoreProvider).groups(budgetSyncId: widget.args.budgetSyncId);
       if (mounted) setState(() => _categoryGroups = groups);
       return;
     }

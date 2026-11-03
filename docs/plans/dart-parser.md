@@ -364,6 +364,33 @@ repopulate.
   maps a statement read before connecting the same way once Actual's categories load. Unlinked
   local suggestions are still dropped on import.
 
+### Phase 4d as built (2026-11-02)
+
+- Backend `categorydb.ts`: `payee_categories` gains `deleted` (forgetting is now a tombstone,
+  also for `DELETE /categories*`) and `synced_at` (server epoch ms of the last write, the sync
+  cursor), added to older files on open. New table `app_categories (kind, id, data JSON,
+  updated_at, synced_at)` holds the app's groups, categories and links, opaque to the backend.
+- `POST /categories/sync` `{ budgetSyncId?, since, mappings, appCategories }` →
+  `{ mappings, appCategories, now }`. Newest `updatedAt` wins per row, ties keep the backend's;
+  the answer has rows written since `since` (inclusive, so a write in the same millisecond isn't
+  missed) plus the backend's row for every change of the app's that lost. Mappings need a
+  budget; without one only the app's categories travel. Logs counts only.
+- App `CategorySync` (`data/local/db/category_sync.dart`): sends groups, categories and links
+  (not copies of Actual's) changed since the last sync; with Actual ready, also the budget's and
+  unscoped mappings as Actual ids through `category_links`, newest per payee. An unlinked mapping
+  waits; linking it later sends it. Incoming rows merge newest-wins. A mapping for an Actual
+  category no local one links to creates a copy (`actual:<id>`, source `actual`, linked), shown
+  in the picker only for its budget and not in the Categories screen. Cursor and watermark per
+  budget in `SettingsStore`.
+- Schema 2: `category_links.updated_at`. Presets are seeded with `updatedAt` 0, so on a new
+  phone the user's renames from the backend beat the defaults.
+- When: `CategorySyncController` runs when the link state settles or changes (app start, backend
+  or Actual connected, budget switched), 2 s after any local category or memory change, and from
+  "Sync with the backend" on the Category memory screen. One at a time.
+- Not done: the backend running `learn-from-actual` by itself when a budget's memory is empty
+  (it needs an account and dates; the button is there), the progress sheet (the sync runs in the
+  background and logs counts), and restoring in replace mode (backups plan).
+
 ## Phase 5 — App integration
 
 In `features/import/inbox_controller.dart`, per queued PDF:

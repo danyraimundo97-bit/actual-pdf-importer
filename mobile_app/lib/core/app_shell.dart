@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/providers.dart';
+import '../features/categories/category_sync_controller.dart';
 import '../features/import/inbox_controller.dart';
 import 'services/share_intent_service.dart';
 
@@ -57,6 +59,16 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    // Category sync (when there's a backend): once the connection state is
+    // known or changes (app start, backend or Actual connected, budget
+    // switched), and shortly after the phone's categories or memory change.
+    ref.listen(linkStateProvider, (previous, next) {
+      if (next.hasValue && next.valueOrNull != previous?.valueOrNull) {
+        ref.read(categorySyncProvider.notifier).syncNow();
+      }
+    });
+    ref.listen(categoryMemoryRevisionProvider, (_, _) => ref.read(categorySyncProvider.notifier).request());
+
     final inboxWaiting = ref.watch(
       inboxProvider.select(
         (items) => items

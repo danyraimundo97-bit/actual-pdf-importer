@@ -11,6 +11,8 @@ class SettingsStore {
   static const _kDebugLogging = 'debug_logging';
   static const _kParseOnDevice = 'parse_on_device';
   static const _kSkippedMatchesPrefix = 'category_match_skipped:';
+  static const _kSyncCursorPrefix = 'category_sync_cursor:';
+  static const _kSyncWatermarkPrefix = 'category_sync_watermark:';
 
   final SharedPreferences _prefs;
 
@@ -50,6 +52,16 @@ class SettingsStore {
       (_prefs.getStringList('$_kSkippedMatchesPrefix$budgetSyncId') ?? const []).toSet();
   Future<void> setSkippedCategoryMatches(String budgetSyncId, Set<String> ids) =>
       _prefs.setStringList('$_kSkippedMatchesPrefix$budgetSyncId', ids.toList()..sort());
+
+  /// Category sync bookkeeping, per budget ('' = none): the backend's `now`
+  /// from the last sync (its clock), and when that sync started on the phone
+  /// (the phone's clock: rows edited after it are sent next time).
+  int? categorySyncCursor(String budgetKey) => _prefs.getInt('$_kSyncCursorPrefix$budgetKey');
+  int? categorySyncWatermark(String budgetKey) => _prefs.getInt('$_kSyncWatermarkPrefix$budgetKey');
+  Future<void> setCategorySync(String budgetKey, {required int cursor, required int watermark}) async {
+    await _prefs.setInt('$_kSyncCursorPrefix$budgetKey', cursor);
+    await _prefs.setInt('$_kSyncWatermarkPrefix$budgetKey', watermark);
+  }
 
   Future<void> clear() => _prefs.clear();
 }

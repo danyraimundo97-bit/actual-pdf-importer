@@ -179,4 +179,37 @@ void main() {
       expect(await store.mappings(budgetSyncId: 'b1'), hasLength(1));
     });
   });
+
+  test('a version 1 database (before sync) upgrades and keeps its links', () async {
+    final old = AppDatabase(
+      NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute('''
+            CREATE TABLE category_groups (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, sort INTEGER NOT NULL,
+              is_income INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL, preset_key TEXT NULL UNIQUE,
+              hidden INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+            CREATE TABLE categories (id TEXT NOT NULL PRIMARY KEY, group_id TEXT NOT NULL REFERENCES category_groups (id),
+              name TEXT NOT NULL, sort INTEGER NOT NULL, source TEXT NOT NULL, preset_key TEXT NULL UNIQUE,
+              hidden INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
+            CREATE TABLE category_links (category_id TEXT NOT NULL REFERENCES categories (id),
+              budget_sync_id TEXT NOT NULL, actual_category_id TEXT NOT NULL,
+              PRIMARY KEY (category_id, budget_sync_id));
+            CREATE TABLE payee_categories (budget_sync_id TEXT NOT NULL, payee_key TEXT NOT NULL,
+              payee_label TEXT NOT NULL, category_id TEXT NOT NULL REFERENCES categories (id),
+              updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (budget_sync_id, payee_key));
+            INSERT INTO category_groups VALUES ('preset:food', 'Food', 1, 0, 'preset', 'food', 0, 5);
+            INSERT INTO categories VALUES ('preset:food.groceries', 'preset:food', 'Groceries', 0, 'preset', 'food.groceries', 0, 5);
+            INSERT INTO category_links VALUES ('preset:food.groceries', 'b1', 'a-groceries');
+          ''');
+          raw.userVersion = 1;
+        },
+      ),
+    );
+    addTearDown(old.close);
+
+    expect(await LocalCategoryStore(old).links('b1'), {presetId('food.groceries'): 'a-groceries'});
+    final link = await old.select(old.categoryLinks).getSingle();
+    expect(link.updatedAt, 0);
+  });
 }

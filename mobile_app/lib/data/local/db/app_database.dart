@@ -9,7 +9,9 @@ part 'app_database.g.dart';
 // (docs/plans/dart-parser.md, Phase 4). Times are epoch milliseconds, so
 // the backend sync (newest wins) compares them exactly.
 
-/// `source`: 'preset' (seeded from [presetGroups]) or 'user'.
+/// `source`: 'preset' (seeded from [presetGroups]), 'user', or 'actual' (a
+/// copy of an Actual category the phone learned a mapping for, id
+/// `actual:<Actual id>`; see CategorySync).
 class CategoryGroups extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
@@ -45,6 +47,9 @@ class CategoryLinks extends Table {
   TextColumn get budgetSyncId => text()();
   TextColumn get actualCategoryId => text()();
 
+  /// Epoch ms, for the sync (schema 2; 0 for links made before).
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+
   @override
   Set<Column> get primaryKey => {categoryId, budgetSyncId};
 }
@@ -69,11 +74,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? driftDatabase(name: 'app'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) await m.addColumn(categoryLinks, categoryLinks.updatedAt);
+    },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
       // Every open, not just the first: a newer app version may ship
@@ -85,8 +93,12 @@ class AppDatabase extends _$AppDatabase {
   /// Inserts presets missing by `presetKey`. Never touches one that exists,
   /// so a rename or a hidden preset survives app updates; a preset the user
   /// deleted isn't possible (presets are hidden, not deleted).
-  Future<void> seedPresets({DateTime? now}) => transaction(() async {
-    final at = (now ?? DateTime.now()).millisecondsSinceEpoch;
+  ///
+  /// Seeded rows get `updatedAt` 0, older than any real edit: on a new phone
+  /// the sync then brings back the user's renames instead of the defaults
+  /// winning.
+  Future<void> seedPresets() => transaction(() async {
+    const at = 0;
     final knownGroups = {
       for (final g in await select(categoryGroups).get())
         if (g.presetKey != null) g.presetKey!: g.id,

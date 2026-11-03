@@ -5,6 +5,7 @@ import '../../../core/errors/api_exception.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/category_memory_source.dart';
+import '../category_sync_controller.dart';
 import '../../../data/models/actual_account.dart';
 import '../../../data/models/actual_category.dart';
 import '../../../data/models/category_mapping.dart';
@@ -169,6 +170,19 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
     }
   }
 
+  Future<void> _syncNow() async {
+    final status = await ref.read(categorySyncProvider.notifier).syncNow();
+    if (!mounted) return;
+    final message = switch (status.phase) {
+      CategorySyncPhase.failed => status.error ?? 'Could not sync.',
+      CategorySyncPhase.done when (status.result?.received ?? 0) == 0 => 'Up to date.',
+      CategorySyncPhase.done => 'Synced: ${status.result!.received} changes from the backend.',
+      _ => 'Already syncing.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    await _load();
+  }
+
   Future<void> _learnFromActual() async {
     final result = await showModalBottomSheet<_LearnRequest>(
       context: context,
@@ -244,6 +258,12 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
               icon: const Icon(Icons.sync_rounded),
               tooltip: 'Learn from Actual',
               onPressed: _learnFromActual,
+            ),
+          if (ref.watch(appConfigProvider).backendUrl?.isNotEmpty ?? false)
+            IconButton(
+              icon: const Icon(Icons.cloud_sync_outlined),
+              tooltip: 'Sync with the backend',
+              onPressed: _syncNow,
             ),
           const SizedBox(width: Space.sm),
         ],

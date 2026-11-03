@@ -1063,11 +1063,24 @@ class $CategoryLinksTable extends CategoryLinks
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     categoryId,
     budgetSyncId,
     actualCategoryId,
+    updatedAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1111,6 +1124,12 @@ class $CategoryLinksTable extends CategoryLinks
     } else if (isInserting) {
       context.missing(_actualCategoryIdMeta);
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
     return context;
   }
 
@@ -1132,6 +1151,10 @@ class $CategoryLinksTable extends CategoryLinks
         DriftSqlType.string,
         data['${effectivePrefix}actual_category_id'],
       )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
@@ -1145,10 +1168,14 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
   final String categoryId;
   final String budgetSyncId;
   final String actualCategoryId;
+
+  /// Epoch ms, for the sync (schema 2; 0 for links made before).
+  final int updatedAt;
   const CategoryLink({
     required this.categoryId,
     required this.budgetSyncId,
     required this.actualCategoryId,
+    required this.updatedAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1156,6 +1183,7 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
     map['category_id'] = Variable<String>(categoryId);
     map['budget_sync_id'] = Variable<String>(budgetSyncId);
     map['actual_category_id'] = Variable<String>(actualCategoryId);
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
@@ -1164,6 +1192,7 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
       categoryId: Value(categoryId),
       budgetSyncId: Value(budgetSyncId),
       actualCategoryId: Value(actualCategoryId),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -1176,6 +1205,7 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
       categoryId: serializer.fromJson<String>(json['categoryId']),
       budgetSyncId: serializer.fromJson<String>(json['budgetSyncId']),
       actualCategoryId: serializer.fromJson<String>(json['actualCategoryId']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -1185,6 +1215,7 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
       'categoryId': serializer.toJson<String>(categoryId),
       'budgetSyncId': serializer.toJson<String>(budgetSyncId),
       'actualCategoryId': serializer.toJson<String>(actualCategoryId),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
@@ -1192,10 +1223,12 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
     String? categoryId,
     String? budgetSyncId,
     String? actualCategoryId,
+    int? updatedAt,
   }) => CategoryLink(
     categoryId: categoryId ?? this.categoryId,
     budgetSyncId: budgetSyncId ?? this.budgetSyncId,
     actualCategoryId: actualCategoryId ?? this.actualCategoryId,
+    updatedAt: updatedAt ?? this.updatedAt,
   );
   CategoryLink copyWithCompanion(CategoryLinksCompanion data) {
     return CategoryLink(
@@ -1208,6 +1241,7 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
       actualCategoryId: data.actualCategoryId.present
           ? data.actualCategoryId.value
           : this.actualCategoryId,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -1216,37 +1250,43 @@ class CategoryLink extends DataClass implements Insertable<CategoryLink> {
     return (StringBuffer('CategoryLink(')
           ..write('categoryId: $categoryId, ')
           ..write('budgetSyncId: $budgetSyncId, ')
-          ..write('actualCategoryId: $actualCategoryId')
+          ..write('actualCategoryId: $actualCategoryId, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(categoryId, budgetSyncId, actualCategoryId);
+  int get hashCode =>
+      Object.hash(categoryId, budgetSyncId, actualCategoryId, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is CategoryLink &&
           other.categoryId == this.categoryId &&
           other.budgetSyncId == this.budgetSyncId &&
-          other.actualCategoryId == this.actualCategoryId);
+          other.actualCategoryId == this.actualCategoryId &&
+          other.updatedAt == this.updatedAt);
 }
 
 class CategoryLinksCompanion extends UpdateCompanion<CategoryLink> {
   final Value<String> categoryId;
   final Value<String> budgetSyncId;
   final Value<String> actualCategoryId;
+  final Value<int> updatedAt;
   final Value<int> rowid;
   const CategoryLinksCompanion({
     this.categoryId = const Value.absent(),
     this.budgetSyncId = const Value.absent(),
     this.actualCategoryId = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CategoryLinksCompanion.insert({
     required String categoryId,
     required String budgetSyncId,
     required String actualCategoryId,
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : categoryId = Value(categoryId),
        budgetSyncId = Value(budgetSyncId),
@@ -1255,12 +1295,14 @@ class CategoryLinksCompanion extends UpdateCompanion<CategoryLink> {
     Expression<String>? categoryId,
     Expression<String>? budgetSyncId,
     Expression<String>? actualCategoryId,
+    Expression<int>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (categoryId != null) 'category_id': categoryId,
       if (budgetSyncId != null) 'budget_sync_id': budgetSyncId,
       if (actualCategoryId != null) 'actual_category_id': actualCategoryId,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1269,12 +1311,14 @@ class CategoryLinksCompanion extends UpdateCompanion<CategoryLink> {
     Value<String>? categoryId,
     Value<String>? budgetSyncId,
     Value<String>? actualCategoryId,
+    Value<int>? updatedAt,
     Value<int>? rowid,
   }) {
     return CategoryLinksCompanion(
       categoryId: categoryId ?? this.categoryId,
       budgetSyncId: budgetSyncId ?? this.budgetSyncId,
       actualCategoryId: actualCategoryId ?? this.actualCategoryId,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1291,6 +1335,9 @@ class CategoryLinksCompanion extends UpdateCompanion<CategoryLink> {
     if (actualCategoryId.present) {
       map['actual_category_id'] = Variable<String>(actualCategoryId.value);
     }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1303,6 +1350,7 @@ class CategoryLinksCompanion extends UpdateCompanion<CategoryLink> {
           ..write('categoryId: $categoryId, ')
           ..write('budgetSyncId: $budgetSyncId, ')
           ..write('actualCategoryId: $actualCategoryId, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2700,6 +2748,7 @@ typedef $$CategoryLinksTableCreateCompanionBuilder =
       required String categoryId,
       required String budgetSyncId,
       required String actualCategoryId,
+      Value<int> updatedAt,
       Value<int> rowid,
     });
 typedef $$CategoryLinksTableUpdateCompanionBuilder =
@@ -2707,6 +2756,7 @@ typedef $$CategoryLinksTableUpdateCompanionBuilder =
       Value<String> categoryId,
       Value<String> budgetSyncId,
       Value<String> actualCategoryId,
+      Value<int> updatedAt,
       Value<int> rowid,
     });
 
@@ -2755,6 +2805,11 @@ class $$CategoryLinksTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$CategoriesTableFilterComposer get categoryId {
     final $$CategoriesTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -2795,6 +2850,11 @@ class $$CategoryLinksTableOrderingComposer
 
   ColumnOrderings<String> get actualCategoryId => $composableBuilder(
     column: $table.actualCategoryId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -2840,6 +2900,9 @@ class $$CategoryLinksTableAnnotationComposer
     column: $table.actualCategoryId,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
   $$CategoriesTableAnnotationComposer get categoryId {
     final $$CategoriesTableAnnotationComposer composer = $composerBuilder(
@@ -2896,11 +2959,13 @@ class $$CategoryLinksTableTableManager
                 Value<String> categoryId = const Value.absent(),
                 Value<String> budgetSyncId = const Value.absent(),
                 Value<String> actualCategoryId = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoryLinksCompanion(
                 categoryId: categoryId,
                 budgetSyncId: budgetSyncId,
                 actualCategoryId: actualCategoryId,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2908,11 +2973,13 @@ class $$CategoryLinksTableTableManager
                 required String categoryId,
                 required String budgetSyncId,
                 required String actualCategoryId,
+                Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoryLinksCompanion.insert(
                 categoryId: categoryId,
                 budgetSyncId: budgetSyncId,
                 actualCategoryId: actualCategoryId,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

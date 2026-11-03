@@ -36,8 +36,11 @@ class LocalCategoryStore {
   int get _at => _now().millisecondsSinceEpoch;
 
   /// Visible groups and categories, in their order, shaped like Actual's so
-  /// the same picker shows either. Empty groups are left out.
-  Future<List<ActualCategoryGroup>> groups() async {
+  /// the same picker shows either. Empty groups are left out. Copies of
+  /// Actual categories (source 'actual') show only for the budget they're
+  /// linked in.
+  Future<List<ActualCategoryGroup>> groups({String? budgetSyncId}) async {
+    final ofBudget = budgetSyncId == null ? const <String>{} : (await links(budgetSyncId)).keys.toSet();
     final groups =
         await (_db.select(_db.categoryGroups)
               ..where((g) => g.hidden.equals(false))
@@ -48,6 +51,7 @@ class LocalCategoryStore {
               ..where((c) => c.hidden.equals(false))
               ..orderBy([(c) => OrderingTerm(expression: c.sort)]))
             .get();
+    categories.removeWhere((c) => c.source == 'actual' && !ofBudget.contains(c.id));
     return [
       for (final g in groups)
         if (categories.any((c) => c.groupId == g.id))
@@ -164,6 +168,7 @@ class LocalCategoryStore {
           categoryId: categoryId,
           budgetSyncId: budgetSyncId,
           actualCategoryId: actualCategoryId,
+          updatedAt: Value(_at),
         ),
       );
 
@@ -183,12 +188,20 @@ class LocalCategoryStore {
 
   // --- Managing the categories themselves (Settings → Categories) -------
 
-  /// Every group and category, hidden ones included, in order.
+  /// Every group and category the user manages, hidden ones included, in
+  /// order. Copies of Actual categories are left out: they're Actual's to
+  /// edit, and they're already linked.
   Future<List<ManagedGroup>> allGroups() async {
-    final groups = await (_db.select(
-      _db.categoryGroups,
-    )..orderBy([(g) => OrderingTerm(expression: g.isIncome), (g) => OrderingTerm(expression: g.sort)])).get();
-    final categories = await (_db.select(_db.categories)..orderBy([(c) => OrderingTerm(expression: c.sort)])).get();
+    final groups =
+        await (_db.select(_db.categoryGroups)
+              ..where((g) => g.source.isNotValue('actual'))
+              ..orderBy([(g) => OrderingTerm(expression: g.isIncome), (g) => OrderingTerm(expression: g.sort)]))
+            .get();
+    final categories =
+        await (_db.select(_db.categories)
+              ..where((c) => c.source.isNotValue('actual'))
+              ..orderBy([(c) => OrderingTerm(expression: c.sort)]))
+            .get();
     return [
       for (final g in groups)
         (
@@ -296,7 +309,9 @@ class LocalCategoryStore {
   }
 
   /// True for an id from this store, as opposed to one of Actual's: presets
-  /// are `preset:<key>` (see presetId), user categories (Phase 4b) will be
-  /// `local:<uuid>`.
-  static bool isLocalId(String id) => id.startsWith('preset:') || id.startsWith('local:');
+  /// are `preset:<key>` (see presetId), user categories `local:<uuid>`, and
+  /// the phone's copies of Actual categories `actual:<Actual id>`. All of
+  /// them go through category_links before reaching Actual.
+  static bool isLocalId(String id) =>
+      id.startsWith('preset:') || id.startsWith('local:') || id.startsWith('actual:');
 }

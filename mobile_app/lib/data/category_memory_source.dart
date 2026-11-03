@@ -67,7 +67,7 @@ class LocalCategoryMemory implements CategoryMemorySource {
   ];
 
   @override
-  Future<List<ActualCategoryGroup>> categoryGroups() => _store.groups();
+  Future<List<ActualCategoryGroup>> categoryGroups() => _store.groups(budgetSyncId: _budgetSyncId);
 
   @override
   Future<void> upsert({required String payee, required String categoryId, String? categoryName}) =>

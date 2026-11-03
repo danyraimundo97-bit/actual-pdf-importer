@@ -44,6 +44,9 @@ import {
   listCategoryMappings,
   lookupCategory,
   rememberCategory,
+  syncCategories,
+  type AppCategoryChange,
+  type MappingChange,
 } from './categorydb';
 
 const log = logger.child({ area: 'app' });
@@ -613,6 +616,90 @@ app.delete('/categories/:payee', (req: Request, res: Response) => {
 // range and learns payee -> category from them. This is how the memory
 // gets built without a manual admin UI: categorize normally in the Actual
 // app, then call this to backfill.
+/** Most rows one sync may carry each way; a phone's memory is far smaller. */
+const MAX_SYNC_ROWS = 20_000;
+
+function parseMappingChanges(value: unknown): MappingChange[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_SYNC_ROWS) {
+    throw new InvalidFieldError('mappings', `must be an array of at most ${MAX_SYNC_ROWS}`);
+  }
+  return value.map((m, i) => {
+    const ok =
+      m &&
+      typeof m.payee === 'string' &&
+      m.payee.trim() &&
+      typeof m.categoryId === 'string' &&
+      Number.isFinite(m.updatedAt) &&
+      typeof m.deleted === 'boolean' &&
+      (m.categoryName === undefined || m.categoryName === null || typeof m.categoryName === 'string');
+    if (!ok) throw new InvalidFieldError(`mappings[${i}]`, 'needs payee, categoryId, updatedAt (ms) and deleted');
+    return {
+      payee: m.payee,
+      categoryId: m.categoryId,
+      categoryName: m.categoryName ?? undefined,
+      updatedAt: m.updatedAt,
+      deleted: m.deleted,
+    };
+  });
+}
+
+function parseAppCategoryChanges(value: unknown): AppCategoryChange[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_SYNC_ROWS) {
+    throw new InvalidFieldError('appCategories', `must be an array of at most ${MAX_SYNC_ROWS}`);
+  }
+  return value.map((c, i) => {
+    const ok =
+      c &&
+      ['group', 'category', 'link'].includes(c.kind) &&
+      typeof c.id === 'string' &&
+      c.id &&
+      Number.isFinite(c.updatedAt) &&
+      c.data !== undefined;
+    if (!ok) throw new InvalidFieldError(`appCategories[${i}]`, 'needs kind, id, data and updatedAt (ms)');
+    return { kind: c.kind, id: c.id, data: c.data, updatedAt: c.updatedAt };
+  });
+}
+
+/**
+ * Two-way sync with the app's category memory and its own categories (see
+ * syncCategories in categorydb.ts). Mappings are the budget's and carry
+ * Actual category ids; the app translates its own ids before sending. With
+ * no budget, only the app's categories travel.
+ */
+app.post('/categories/sync', (req: Request, res: Response) => {
+  const { budgetSyncId, since } = req.body ?? {};
+  try {
+    if (since !== null && since !== undefined && !Number.isFinite(since)) {
+      throw new InvalidFieldError('since', 'must be epoch milliseconds or null');
+    }
+    const scope = resolveBudgetScope(budgetSyncId);
+    const mappings = parseMappingChanges(req.body?.mappings);
+    if (!scope && mappings.length > 0) throw new NoBudgetSelectedError();
+    const appCategories = parseAppCategoryChanges(req.body?.appCategories);
+    const result = syncCategories({
+      budgetSyncId: scope,
+      since: typeof since === 'number' ? since : null,
+      mappings: scope ? mappings : [],
+      appCategories,
+    });
+    logger.info(
+      {
+        full: since == null,
+        mappingsIn: mappings.length,
+        mappingsOut: scope ? result.mappings.length : 0,
+        categoriesIn: appCategories.length,
+        categoriesOut: result.appCategories.length,
+      },
+      'Category sync',
+    );
+    res.json({ ...result, mappings: scope ? result.mappings : [] });
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while syncing categories.');
+  }
+});
+
 app.post('/categories/learn-from-actual', async (req: Request, res: Response) => {
   const { accountId, startDate, endDate, budgetSyncId, budgetPassword } = req.body ?? {};
   if (!accountId || !startDate || !endDate) {

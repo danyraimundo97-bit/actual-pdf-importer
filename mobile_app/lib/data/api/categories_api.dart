@@ -7,6 +7,12 @@ import 'api_client.dart';
 /// Wraps the local category-memory endpoints (/categories) — not to be
 /// confused with ImporterApi.getActualCategories, which reads Actual's
 /// own categories. This is the payee -> category memory in categorydb.ts.
+typedef CategorySyncResponse = ({
+  List<Map<String, dynamic>> mappings,
+  List<Map<String, dynamic>> appCategories,
+  int now,
+});
+
 class CategoriesApi {
   final ApiClient _client;
 
@@ -63,6 +69,34 @@ class CategoriesApi {
       ),
     );
     return (res.data as Map<String, dynamic>)['deleted'] as int;
+  }
+
+  /// POST /categories/sync: sends what changed on the phone, gets what
+  /// changed on the backend since [since] (the `now` of the previous sync;
+  /// null = everything). Mappings carry Actual category ids.
+  Future<CategorySyncResponse> sync({
+    String? budgetSyncId,
+    int? since,
+    required List<Map<String, Object?>> mappings,
+    required List<Map<String, Object?>> appCategories,
+  }) async {
+    final res = await _guarded(
+      () => _dio.post(
+        '/categories/sync',
+        data: {
+          'budgetSyncId': ?budgetSyncId,
+          'since': since,
+          'mappings': mappings,
+          'appCategories': appCategories,
+        },
+      ),
+    );
+    final data = res.data as Map<String, dynamic>;
+    return (
+      mappings: (data['mappings'] as List).cast<Map<String, dynamic>>(),
+      appCategories: (data['appCategories'] as List).cast<Map<String, dynamic>>(),
+      now: data['now'] as int,
+    );
   }
 
   Future<({int learned, int scanned})> learnFromActual({
