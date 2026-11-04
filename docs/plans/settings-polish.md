@@ -189,3 +189,25 @@ before any Flutter code.**
   later.
 - New settings. Backups content is in `feature/backups`. This branch only gives it a row.
 - Changing the setup guide.
+
+## As built (Phases 0–2, 2026-11-04)
+
+- **Phase 0**: mockup approved (private artifact "Settings redesign v0"). One change from the
+  decisions above: in dark mode the groups sit on `surfaceContainerLow`, since
+  `surfaceContainerLowest` is darker than the background and looked sunk in
+  (`settingsGroupColor`).
+- **Phase 1**: `Motion` in `app_theme.dart` (`press`, `small`, `sheetIn`/`sheetOut`, `easeOut`,
+  `easeInOut`, `drawer`, `pressScale`, `Motion.of`, `Motion.sheet`).
+  `lib/shared/widgets/settings_group.dart`: `SettingsGroup`, `SettingsRow` (with `enabled`,
+  `destructive`), `SettingsSwitchRow` (haptic tick), `StatusDot` (`SettingsStatus` ok / off
+  (hollow) / failing / busy).
+- **Phase 2**: the overview, `BackendSettingsScreen` (`/settings/backend`),
+  `ActualSettingsScreen` (`/settings/actual`), `showBudgetSheet` (drawer curve, loads on open).
+  "Forget statement passwords" asks first.
+  - The Backups group has no label: its one row already says "Backups".
+  - "Category memory" shows no count yet: there's no cheap source that works both with and
+    without Actual. A later change can add one.
+  - The status logic is in `backendStatus` / `actualStatus` in `settings_screen.dart`.
+- Tests: `test/settings_test.dart` (10). App total: 119 pass, 1 skipped.
+- Left for Phase 3/4: Emil's review table, 200% text, TalkBack, 320dp width, slow motion and the
+  phone check.

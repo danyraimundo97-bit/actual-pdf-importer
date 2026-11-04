@@ -18,6 +18,8 @@ import '../features/import/screens/import_screen.dart';
 import '../features/quick_add/screens/quick_add_screen.dart';
 import '../features/review/screens/review_screen.dart';
 import '../features/review/screens/review_screen_args.dart';
+import '../features/settings/screens/actual_settings_screen.dart';
+import '../features/settings/screens/backend_settings_screen.dart';
 import '../features/settings/screens/settings_screen.dart';
 import '../features/setup/screens/setup_screen.dart';
 import '../features/welcome/screens/welcome_screen.dart';
@@ -104,6 +106,16 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: '/settings',
                 builder: (context, state) => const SettingsScreen(),
                 routes: [
+                  GoRoute(
+                    path: 'backend',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const BackendSettingsScreen(),
+                  ),
+                  GoRoute(
+                    path: 'actual',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const ActualSettingsScreen(),
+                  ),
                   GoRoute(
                     path: 'categories',
                     parentNavigatorKey: _rootNavigatorKey,

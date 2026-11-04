@@ -4,14 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../../data/models/actual_budget.dart';
 import '../../../data/providers.dart';
-import '../../../shared/widgets/busy_button.dart';
-import '../../../shared/widgets/inline_note.dart';
+import '../../../shared/widgets/settings_group.dart';
+import '../../categories/screens/match_categories_screen.dart';
 import '../connection_controller.dart';
-import '../widgets/actual_server_card.dart';
-import '../widgets/connection_widgets.dart';
+import '../widgets/budget_sheet.dart';
 
+/// Settings as a grouped overview (docs/plans/settings-polish.md): the
+/// backend, Actual and the budget with their status first, then the groups.
+/// The backend and Actual each have their own screen; the budget is a sheet.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
@@ -20,61 +21,49 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  late final TextEditingController _urlController;
-  late final TextEditingController _tokenController;
-
   @override
   void initState() {
     super.initState();
-    final config = ref.read(appConfigProvider);
-    _urlController = TextEditingController(text: config.backendUrl ?? '');
-    _tokenController = TextEditingController();
-    ref.read(secretStoreProvider).apiToken.then((token) {
-      if (mounted && token != null) {
-        setState(() => _tokenController.text = token);
-      }
-    });
-    // Check the saved connection right away, so the Actual server and the
-    // budgets show their real state without pressing "Save and test".
-    if (config.backendUrl != null && config.backendUrl!.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
-    }
-  }
-
-  Future<void> _refresh() async {
-    final controller = ref.read(connectionControllerProvider.notifier);
-    if (await controller.test() && ref.read(connectionControllerProvider).actualConfigured) {
-      await controller.loadBudgets();
-    }
-  }
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    _tokenController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    FocusScope.of(context).unfocus();
-    final controller = ref.read(connectionControllerProvider.notifier);
-    final ok = await controller.saveAndTest(url: _urlController.text, token: _tokenController.text);
-    if (ok && ref.read(connectionControllerProvider).actualConfigured) await controller.loadBudgets();
-  }
-
-  Future<void> _selectBudget(ActualBudget budget) async {
-    final chosen = await chooseBudget(context, ref, budget);
-    if (chosen && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Budget set to "${budget.name}".')));
+    // Check the saved connection right away, so the overview shows the real
+    // state of the backend and Actual.
+    final url = ref.read(appConfigProvider).backendUrl;
+    if (url != null && url.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(connectionControllerProvider.notifier).test();
+      });
     }
   }
 
   Future<void> _forgetPdfPasswords() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Forget statement passwords?'),
+        content: const Text(
+          "The passwords saved for opening statements are removed from this phone. You'll be asked "
+          'again the next time.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: context.colors.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Forget'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
     await ref.read(secretStoreProvider).forgetAllPdfPasswords();
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Saved statement passwords forgotten.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Statement passwords forgotten.')));
+    }
+  }
+
+  Future<void> _chooseBudget() async {
+    final name = await showBudgetSheet(context);
+    if (name != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Switched to "$name".')));
     }
   }
 
@@ -82,9 +71,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final config = ref.watch(appConfigProvider);
     final check = ref.watch(connectionControllerProvider);
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final muted = context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant);
     final parseOnDevice = ref.watch(parseOnDeviceProvider);
+    final ready = ref.watch(linkStateProvider).valueOrNull == LinkState.ready;
+    final pending = ready ? ref.watch(pendingCategoryMatchesProvider).valueOrNull ?? 0 : 0;
+    final hasBackend = config.backendUrl?.isNotEmpty == true;
+    final backend = backendStatus(config, check);
+    final actual = actualStatus(config, check);
 
     return Scaffold(
       appBar: AppBar(
@@ -97,162 +89,106 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.xxl),
         children: [
-          const _SectionTitle('Connection'),
-          Text('Backend', style: context.text.titleMedium),
-          const SizedBox(height: Space.xs),
-          Text('The bridge between this app and your Actual server.', style: muted),
-          const SizedBox(height: Space.md),
-          ConnectionFields(
-            urlController: _urlController,
-            tokenController: _tokenController,
-            onSubmitted: _save,
-          ),
-          const SizedBox(height: Space.xl),
-          BusyButton(
-            label: 'Save and test',
-            busy: check.status == ConnectionStatus.testing,
-            onPressed: _save,
-          ),
-          AnimatedSize(
-            duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            alignment: Alignment.topCenter,
-            child: check.message == null
-                ? const SizedBox(width: double.infinity)
-                : Padding(
-                    padding: const EdgeInsets.only(top: Space.md),
-                    child: InlineNote(
-                      message: check.message!,
-                      tone: check.isConnected ? NoteTone.success : NoteTone.error,
-                    ),
-                  ),
-          ),
-          const SizedBox(height: Space.xl),
-          Text('Actual server', style: context.text.titleMedium),
-          const SizedBox(height: Space.sm),
-          const ActualServerCard(),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Budget'),
-          if (!check.actualConfigured)
-            Text(
-              check.isConnected
-                  ? 'Connect an Actual server above to choose a budget.'
-                  : 'Connect the backend and an Actual server to choose a budget.',
-              style: muted,
-            )
-          else if (check.budgetsError != null)
-            InlineNote(message: check.budgetsError!, tone: NoteTone.error)
-          else if (!check.loadingBudgets && check.budgets.isEmpty)
-            InlineNote(
-              // Connected with an empty list means the server really has none;
-              // otherwise the list just hasn't been loaded yet.
-              message: check.isConnected
-                  ? noBudgetsMessage
-                  : config.budgetName == null
-                  ? 'Save and test the connection to load your budgets.'
-                  : 'Using "${config.budgetName}". Save and test the connection to switch budgets.',
-            )
-          else
-            BudgetList(
-              budgets: check.budgets,
-              loading: check.loadingBudgets,
-              selectedSyncId: config.budgetSyncId,
-              onSelect: _selectBudget,
-            ),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Categories'),
-          Text(
-            'The payee to category mappings that pre-fill categories when you import or add, '
-            "and the app's own categories, used until Actual is connected.",
-            style: muted,
-          ),
-          const SizedBox(height: Space.lg),
-          Wrap(
-            spacing: Space.sm,
-            runSpacing: Space.sm,
+          SettingsGroup(
             children: [
-              OutlinedButton.icon(
-                onPressed: () => context.push('/settings/categories'),
-                icon: const Icon(Icons.sell_outlined, size: 18),
-                label: const Text('Open category memory'),
+              SettingsRow(
+                icon: Icons.dns_outlined,
+                title: 'Backend',
+                subtitle: StatusDot(status: backend.status, label: backend.label, value: backend.value),
+                onTap: () => context.push('/settings/backend'),
               ),
-              OutlinedButton.icon(
-                onPressed: () => context.push('/settings/category-list'),
-                icon: const Icon(Icons.category_outlined, size: 18),
-                label: const Text('Edit categories'),
+              SettingsRow(
+                icon: Icons.link_rounded,
+                title: 'Actual',
+                subtitle: StatusDot(status: actual.status, label: actual.label, value: actual.value),
+                onTap: () => context.push('/settings/actual'),
               ),
-              if (ref.watch(linkStateProvider).valueOrNull == LinkState.ready)
-                OutlinedButton.icon(
-                  onPressed: () => context.push('/match-categories'),
-                  icon: const Icon(Icons.link_rounded, size: 18),
-                  label: const Text('Match with Actual'),
+              SettingsRow(
+                icon: Icons.account_balance_wallet_outlined,
+                title: 'Budget',
+                subtitle: Text(
+                  check.actualConfigured
+                      ? config.budgetName ?? 'Choose a budget'
+                      : config.budgetName ?? 'Connect Actual first',
+                ),
+                trailing: Icon(Icons.unfold_more_rounded, size: 20, color: context.colors.outline),
+                enabled: check.actualConfigured,
+                onTap: _chooseBudget,
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.xl),
+          SettingsGroup(
+            label: 'Categories',
+            children: [
+              SettingsRow(
+                icon: Icons.history_rounded,
+                title: 'Category memory',
+                onTap: () => context.push('/settings/categories'),
+              ),
+              SettingsRow(
+                icon: Icons.sell_outlined,
+                title: 'Categories',
+                onTap: () => context.push('/settings/category-list'),
+              ),
+              if (ready)
+                SettingsRow(
+                  icon: Icons.compare_arrows_rounded,
+                  title: 'Match with Actual',
+                  trailing: pending > 0 ? _CountChip('$pending to do') : null,
+                  onTap: () => context.push('/match-categories'),
                 ),
             ],
           ),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Backups'),
-          Text(
-            config.backendUrl?.isNotEmpty == true
-                ? 'Scheduled backups of your budget and the app data, made by the backend.'
-                : 'Export the categories and category memory to a file, or import one.',
-            style: muted,
+          const SizedBox(height: Space.xl),
+          // One row that already says what it is: no group label above it.
+          SettingsGroup(
+            children: [
+              SettingsRow(
+                icon: Icons.inventory_2_outlined,
+                title: 'Backups',
+                subtitle: Text(hasBackend ? 'Scheduled by the backend' : 'Export and import on this phone'),
+                onTap: () => context.push('/settings/backups'),
+              ),
+            ],
           ),
-          const SizedBox(height: Space.lg),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () => context.push('/settings/backups'),
-              icon: const Icon(Icons.backup_outlined, size: 18),
-              label: const Text('Backups'),
-            ),
+          const SizedBox(height: Space.xl),
+          SettingsGroup(
+            label: 'Privacy',
+            children: [
+              SettingsSwitchRow(
+                icon: Icons.smartphone_rounded,
+                title: 'Read statements on this phone',
+                subtitle: parseOnDevice
+                    ? "Statements stay on the phone. One the app can't read is sent to the backend only "
+                          'if you ask.'
+                    : 'Statements are sent to the backend, which reads them with its AI provider.',
+                value: parseOnDevice,
+                onChanged: (value) => setParseOnDevice(ref, value),
+              ),
+              SettingsRow(
+                icon: Icons.key_off_outlined,
+                title: 'Forget statement passwords',
+                destructive: true,
+                onTap: _forgetPdfPasswords,
+              ),
+            ],
           ),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Privacy'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Read statements on this phone'),
-            subtitle: Text(
-              parseOnDevice
-                  ? "Statements stay on the phone. One the app can't read is sent to the "
-                        'backend only if you ask.'
-                  : "Statements are sent to the backend, which reads them with its AI provider.",
-              style: muted,
-            ),
-            value: parseOnDevice,
-            onChanged: (value) => setParseOnDevice(ref, value),
-          ),
-          const SizedBox(height: Space.lg),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: _forgetPdfPasswords,
-              icon: const Icon(Icons.delete_outline_rounded, size: 18),
-              label: const Text('Forget statement passwords'),
-            ),
-          ),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Diagnostics'),
-          Text('Logs of what the app did, to find out what went wrong.', style: muted),
-          const SizedBox(height: Space.lg),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () => context.push('/settings/diagnostics'),
-              icon: const Icon(Icons.receipt_long_outlined, size: 18),
-              label: const Text('Logs and diagnostics'),
-            ),
-          ),
-          const SizedBox(height: Space.xxl + Space.sm),
-          const _SectionTitle('Setup guide'),
-          Text('Walk through connecting and choosing a budget again.', style: muted),
-          const SizedBox(height: Space.lg),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: () => context.push('/setup'),
-              icon: const Icon(Icons.restart_alt_rounded, size: 18),
-              label: const Text('Run setup again'),
-            ),
+          const SizedBox(height: Space.xl),
+          SettingsGroup(
+            label: 'Help',
+            children: [
+              SettingsRow(
+                icon: Icons.receipt_long_outlined,
+                title: 'Logs and diagnostics',
+                onTap: () => context.push('/settings/diagnostics'),
+              ),
+              SettingsRow(
+                icon: Icons.restart_alt_rounded,
+                title: 'Run setup again',
+                onTap: () => context.push('/setup'),
+              ),
+            ],
           ),
         ],
       ),
@@ -260,16 +196,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
+typedef StatusView = ({SettingsStatus status, String label, String? value});
+
+/// The backend's row: not set up, being checked, connected (with its host),
+/// or failing.
+StatusView backendStatus(AppConfig config, ConnectionCheck check) {
+  final url = config.backendUrl;
+  if (url == null || url.isEmpty) return (status: SettingsStatus.off, label: 'Not set up', value: null);
+  final host = Uri.tryParse(url)?.host;
+  return switch (check.status) {
+    ConnectionStatus.connected => (status: SettingsStatus.ok, label: 'Connected', value: host),
+    ConnectionStatus.failed => (status: SettingsStatus.failing, label: "Can't reach it", value: host),
+    _ => (status: SettingsStatus.busy, label: 'Checking…', value: null),
+  };
+}
+
+/// Actual's row, which depends on the backend.
+StatusView actualStatus(AppConfig config, ConnectionCheck check) {
+  if (config.backendUrl == null || config.backendUrl!.isEmpty || check.status == ConnectionStatus.failed) {
+    return (status: SettingsStatus.off, label: 'Needs the backend', value: null);
+  }
+  if (!check.isConnected) return (status: SettingsStatus.busy, label: 'Checking…', value: null);
+  if (!check.actualConfigured) return (status: SettingsStatus.off, label: 'Not set up', value: null);
+  final version = check.actual?.serverVersion;
+  final host = Uri.tryParse(check.actual?.serverUrl ?? '')?.host;
+  return (
+    status: SettingsStatus.ok,
+    label: 'Connected',
+    value: version != null ? 'v$version' : (host == null || host.isEmpty ? null : host),
+  );
+}
+
+class _CountChip extends StatelessWidget {
   final String text;
 
-  const _SectionTitle(this.text);
+  const _CountChip(this.text);
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: Space.lg),
-      child: Text(text, style: context.text.titleLarge),
+    final colors = context.colors;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(color: colors.primaryContainer, borderRadius: BorderRadius.circular(999)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
+            child: Text(text, style: context.text.labelMedium?.copyWith(color: colors.onPrimaryContainer)),
+          ),
+        ),
+        const SizedBox(width: Space.sm),
+        Icon(Icons.chevron_right_rounded, size: 20, color: colors.outline),
+      ],
     );
   }
 }

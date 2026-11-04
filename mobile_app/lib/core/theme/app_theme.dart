@@ -31,6 +31,40 @@ class Radii {
   static final BorderRadius controlAll = BorderRadius.circular(control);
 }
 
+/// Motion rule: animate feedback and state changes, never decoration on
+/// screens opened often. Strong ease-out for anything reacting to the user,
+/// the drawer curve for sheets, never ease-in. Under reduced motion
+/// (`MediaQuery.disableAnimationsOf`) movement stops; short fades may stay.
+class Motion {
+  Motion._();
+
+  /// Press feedback (a 0.98 scale).
+  static const Duration press = Duration(milliseconds: 120);
+
+  /// Small state changes: a status dot, a label swap, an inline note.
+  static const Duration small = Duration(milliseconds: 180);
+
+  /// Bottom sheets: in slower than out.
+  static const Duration sheetIn = Duration(milliseconds: 300);
+  static const Duration sheetOut = Duration(milliseconds: 200);
+
+  static const Curve easeOut = Cubic(0.23, 1, 0.32, 1);
+  static const Curve easeInOut = Cubic(0.77, 0, 0.175, 1);
+  static const Curve drawer = Cubic(0.32, 0.72, 0, 1);
+
+  /// The scale a pressed row or button shrinks to.
+  static const double pressScale = 0.98;
+
+  /// [duration], or zero when the system asks for reduced motion.
+  static Duration of(BuildContext context, Duration duration) =>
+      MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration;
+
+  /// For `showModalBottomSheet(sheetAnimationStyle: …)`.
+  static AnimationStyle sheet(BuildContext context) => MediaQuery.disableAnimationsOf(context)
+      ? AnimationStyle.noAnimation
+      : const AnimationStyle(curve: drawer, duration: sheetIn, reverseDuration: sheetOut);
+}
+
 /// Colors that ColorScheme has no slot for. Read via `context.tokens`.
 @immutable
 class AppTokens extends ThemeExtension<AppTokens> {
