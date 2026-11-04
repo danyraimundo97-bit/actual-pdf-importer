@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import express, { NextFunction, Request, Response } from 'express';
 import { aiReadsStatements, processStatement } from './index';
 import {
@@ -37,6 +38,7 @@ import { getDashboard } from './dashboard';
 import { addManualTransaction, getQuickAddOptions, parseManualTransaction } from './transactions';
 import { getAccountPage, parseLimit } from './account-page';
 import { getBudgetMonth, parseMonth } from './budget-month';
+import { defaultEpochsFile, LedgerEpochs, pullLedger } from './ledger';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import {
   clearCategoryMappings,
@@ -473,6 +475,49 @@ app.get('/budget-month', async (req: Request, res: Response) => {
     res.json(await getBudgetMonth(budgetSession, resolveBudgetRef(req.query.budgetSyncId), month));
   } catch (err) {
     sendImporterError(res, err, 'Internal error while loading the budget.');
+  }
+});
+
+// --- Local ledger sync (docs/plans/local-ledger.md, Phase 5) -------------
+
+const ledgerEpochs = new LedgerEpochs(defaultEpochsFile());
+
+/** JSON, gzipped when the client takes it (a full pull is ~1 MB raw). */
+function sendJsonMaybeGzipped(req: Request, res: Response, body: unknown): void {
+  const json = Buffer.from(JSON.stringify(body));
+  res.set('Vary', 'Accept-Encoding');
+  res.type('application/json');
+  if (/\bgzip\b/.test(req.get('accept-encoding') ?? '')) {
+    res.set('Content-Encoding', 'gzip');
+    res.send(zlib.gzipSync(json));
+    return;
+  }
+  res.send(json);
+}
+
+app.get('/ledger/pull', async (req: Request, res: Response) => {
+  try {
+    const epoch = typeof req.query.epoch === 'string' && req.query.epoch !== '' ? req.query.epoch : undefined;
+    let lastId: number | undefined;
+    if (typeof req.query.lastId === 'string' && req.query.lastId !== '') {
+      lastId = Number(req.query.lastId);
+      if (!Number.isSafeInteger(lastId) || lastId < 0) throw new InvalidFieldError('lastId', 'must be a whole number');
+    }
+    const budget = resolveBudgetRef(req.query.budgetSyncId);
+    const pull = await pullLedger(budgetSession, budget, { epoch, lastId }, ledgerEpochs);
+    log.info(
+      {
+        budgetSyncId: budget.syncId,
+        full: pull.full,
+        lastId: pull.lastId,
+        transactions: pull.transactions.length,
+        budgets: pull.budgets.length,
+      },
+      'Ledger pulled',
+    );
+    sendJsonMaybeGzipped(req, res, pull);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while reading the budget for the phone.');
   }
 });
 

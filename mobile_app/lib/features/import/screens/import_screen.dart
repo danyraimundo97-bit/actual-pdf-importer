@@ -11,6 +11,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/local/import_history_store.dart';
 import '../../../data/models/actual_account.dart';
 import '../../../data/models/import_result.dart';
+import '../../../data/ledger_sync_controller.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/inline_note.dart';
 import '../../../shared/widgets/labeled_field.dart';
@@ -208,7 +209,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
         );
     if (phone != null) return;
-    if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
+    ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
     // The import remembered each payee's category on the backend.
     ref.read(categoryMemoryRevisionProvider.notifier).state++;
   }
@@ -274,7 +275,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         'skipped': outcome.skipped,
       });
       await ref.read(importHistoryProvider.notifier).markUndone(entry);
-      if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
+      ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
       if (!mounted) return;
       final skipped = outcome.skipped == 0
           ? ''

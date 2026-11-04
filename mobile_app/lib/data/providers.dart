@@ -6,6 +6,7 @@ import 'api/api_client.dart';
 import 'api/backups_api.dart';
 import 'api/categories_api.dart';
 import 'api/importer_api.dart';
+import 'api/ledger_api.dart';
 import 'local/db/app_database.dart';
 import 'local/db/database_opening.dart';
 import 'local/db/local_category_store.dart';
@@ -13,6 +14,7 @@ import 'local/db/open_connection.dart';
 import 'local/import_history_store.dart';
 import 'local/ledger_reports.dart';
 import 'local/ledger_store.dart';
+import 'ledger_sync_controller.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
 import 'models/backend_config.dart';
@@ -225,13 +227,23 @@ final linkStateProvider = FutureProvider.autoDispose<LinkState>((ref) async {
 /// tab stays alive in the shell, so it listens to this to reload.
 final categoryMemoryRevisionProvider = StateProvider<int>((ref) => 0);
 
-/// True while Home, Budget and the account screen read the phone's own
-/// ledger: whenever Actual isn't connected (docs/plans/local-ledger.md,
-/// Phase 4). With Actual they still ask the backend, until the sync
-/// (Phase 5) keeps a copy of the budget in the ledger.
-final readsLedgerProvider = FutureProvider.autoDispose<bool>((ref) async {
-  return await ref.watch(linkStateProvider.future) != LinkState.ready;
+/// Whose ledger Home, Budget and the account screen show
+/// (docs/plans/local-ledger.md, Phases 4 and 5): the connected Actual
+/// budget's copy (scope = its sync id), or the phone's own budget
+/// ([phoneScope]) without Actual.
+final ledgerScopeProvider = FutureProvider.autoDispose<String>((ref) async {
+  if (await ref.watch(linkStateProvider.future) != LinkState.ready) return phoneScope;
+  return ref.watch(appConfigProvider.select((c) => c.budgetSyncId)) ?? phoneScope;
 });
+
+/// True while the screens show the phone's own budget, which is edited on
+/// the phone. An Actual budget's copy is read-only here until the phone's
+/// changes can be sent (Phase 5b).
+final readsLedgerProvider = FutureProvider.autoDispose<bool>((ref) async {
+  return await ref.watch(ledgerScopeProvider.future) == phoneScope;
+});
+
+final ledgerApiProvider = Provider<LedgerApi>((ref) => LedgerApi(ref.watch(apiClientProvider)));
 
 final ledgerReportsProvider = Provider<LedgerReports>((ref) {
   return LedgerReports(ref.watch(appDatabaseProvider), ref.watch(ledgerStoreProvider));
@@ -243,27 +255,21 @@ final ledgerChangesProvider = StreamProvider.autoDispose<int>((ref) {
   return ref.watch(ledgerStoreProvider).watchChanges().map((_) => ++changes);
 });
 
-/// Home: from the ledger without Actual, else GET /dashboard for the active
-/// budget (invalidated after an import so the numbers reflect it).
+/// Home, from the ledger. An Actual budget is pulled once before its copy
+/// is shown, so an empty copy never reads as an empty budget.
 final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) async {
-  if (await ref.watch(readsLedgerProvider.future)) {
-    ref.watch(ledgerChangesProvider);
-    return ref.watch(ledgerReportsProvider).dashboard(phoneScope);
-  }
-  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
-  return ref.watch(importerApiProvider).getDashboard(budgetSyncId: budgetSyncId);
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
+  ref.watch(ledgerChangesProvider);
+  return ref.watch(ledgerReportsProvider).dashboard(scope);
 });
 
-/// Budget for one month (`null` = the current one): from the ledger without
-/// Actual, else GET /budget-month (invalidated after a quick add or an
-/// import).
+/// Budget for one month (`null` = the current one), from the ledger.
 final budgetMonthProvider = FutureProvider.autoDispose.family<BudgetMonth, String?>((ref, month) async {
-  if (await ref.watch(readsLedgerProvider.future)) {
-    ref.watch(ledgerChangesProvider);
-    return ref.watch(ledgerReportsProvider).budgetMonth(phoneScope, month);
-  }
-  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
-  return ref.watch(importerApiProvider).getBudgetMonth(budgetSyncId: budgetSyncId, month: month);
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
+  ref.watch(ledgerChangesProvider);
+  return ref.watch(ledgerReportsProvider).budgetMonth(scope, month);
 });
 
 final importHistoryStoreProvider = Provider<ImportHistoryStore>((ref) {

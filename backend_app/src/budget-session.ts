@@ -2,6 +2,7 @@ import type * as actualApi from '@actual-app/api';
 import type { Logger } from 'pino';
 import { ActualNotConfiguredError } from './errors';
 import { logger } from './logger';
+import type { LedgerPort } from './ledger';
 
 /**
  * The backend's exclusive hold on Actual Budget (see CONTEXT.md, "Budget
@@ -57,7 +58,10 @@ export type ActualPort = Pick<
   | 'getBudgetMonth'
   | 'getBudgetMonths'
   | 'exportBudget'
->;
+> & {
+  /** Reads for the phone's ledger sync that the public API lacks (ledger.ts). */
+  readonly ledger: LedgerPort;
+};
 
 /**
  * The seam: the session owns the connection lifecycle, the adapter knows

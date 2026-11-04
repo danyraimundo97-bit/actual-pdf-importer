@@ -22,7 +22,7 @@ class LedgerReports {
     return buildLedgerDashboard(
       accounts: await _store.accounts(scope),
       transactions: await _store.allTransactions(scope),
-      categoryNames: await _categoryNames(),
+      categoryNames: await _categoryNames(scope),
       payeeNames: await _store.payeeNames(scope),
       today: _now(),
       months: months,
@@ -35,7 +35,7 @@ class LedgerReports {
     return buildLedgerBudgetMonth(
       month: month ?? ledgerMonthKeys(today, 1).single,
       style: BudgetStyle.parse(await _store.budgetMode(scope)),
-      groups: await _budgetGroups(),
+      groups: await _budgetGroups(scope),
       accounts: await _store.accounts(scope),
       transactions: await _store.allTransactions(scope),
       budgets: await _store.allBudgets(scope),
@@ -69,7 +69,7 @@ class LedgerReports {
             _db.ledgerTransactions,
           )..where((t) => t.parentId.isIn(parents) & t.deleted.equals(false))).get();
     final payees = await _store.payeeNames(account.scope);
-    final categories = await _categoryNames();
+    final categories = await _categoryNames(account.scope);
     return AccountPage(
       accountId: account.id,
       accountName: account.name,
@@ -100,13 +100,42 @@ class LedgerReports {
 
   /// Every category's name, hidden ones included (old transactions keep
   /// theirs).
-  Future<Map<String, String>> _categoryNames() async => {
+  Future<Map<String, String>> _categoryNames(String scope) async => scope == phoneScope
+      ? _phoneCategoryNames()
+      : {
+          for (final c in await (_db.select(_db.ledgerCategories)..where((c) => c.scope.equals(scope))).get())
+            c.id: c.name,
+        };
+
+  Future<Map<String, String>> _phoneCategoryNames() async => {
     for (final c in await _db.select(_db.categories).get()) c.id: c.name,
   };
 
   /// The phone's visible categories, in order, as the budget lists them.
   /// Copies of Actual categories are Actual's, not the phone budget's.
-  Future<List<LedgerBudgetGroup>> _budgetGroups() async {
+  Future<List<LedgerBudgetGroup>> _budgetGroups(String scope) async {
+    if (scope != phoneScope) return _actualBudgetGroups(scope);
+    return _phoneBudgetGroups();
+  }
+
+  /// An Actual budget's visible categories, grouped, in Actual's order.
+  Future<List<LedgerBudgetGroup>> _actualBudgetGroups(String scope) async {
+    final rows =
+        await (_db.select(_db.ledgerCategories)
+              ..where((c) => c.scope.equals(scope) & c.hidden.equals(false) & c.groupHidden.equals(false))
+              ..orderBy([(c) => OrderingTerm(expression: c.groupSort), (c) => OrderingTerm(expression: c.sort)]))
+            .get();
+    final groups = <LedgerBudgetGroup>[];
+    for (final c in rows) {
+      if (groups.isEmpty || groups.last.id != c.groupId) {
+        groups.add((id: c.groupId, name: c.groupName, isIncome: c.groupIsIncome, categories: []));
+      }
+      groups.last.categories.add((id: c.id, name: c.name));
+    }
+    return groups;
+  }
+
+  Future<List<LedgerBudgetGroup>> _phoneBudgetGroups() async {
     final groups =
         await (_db.select(_db.categoryGroups)
               ..where((g) => g.hidden.equals(false) & g.source.isNotValue('actual'))

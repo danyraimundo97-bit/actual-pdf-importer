@@ -12,7 +12,8 @@ import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
-import '../../../shared/widgets/on_phone_status.dart';
+import '../../../data/ledger_sync_controller.dart';
+import '../../../shared/widgets/ledger_status.dart';
 import '../../../shared/widgets/skeleton.dart';
 
 const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -29,7 +30,12 @@ class DashboardScreen extends ConsumerWidget {
     final onPhone = ref.watch(readsLedgerProvider).valueOrNull ?? false;
     final budgetName = onPhone ? null : ref.watch(appConfigProvider).budgetName;
 
-    Future<void> refresh() => ref.refresh(dashboardProvider.future);
+    // Pull-to-refresh asks Actual for what changed (nothing to do on the
+    // phone's own budget), then rebuilds.
+    Future<void> refresh() async {
+      await ref.read(ledgerSyncProvider.notifier).syncNow();
+      return ref.refresh(dashboardProvider.future);
+    }
 
     return Scaffold(
       body: SafeArea(
@@ -105,7 +111,8 @@ class _DashboardBody extends StatelessWidget {
       padding: const EdgeInsets.only(top: Space.xl, bottom: Space.xxl * 3),
       children: [
         _Padded(_Header(data: data, budgetName: budgetName)),
-        if (onPhone) ...[const SizedBox(height: Space.md), const _Padded(OnPhoneStatus())],
+        const SizedBox(height: Space.md),
+        _Padded(LedgerStatus(onPhone: onPhone)),
         if (data.uncategorizedCount > 0) ...[
           const SizedBox(height: Space.xl),
           _Padded(_AttentionRow(count: data.uncategorizedCount)),

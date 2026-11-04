@@ -6,6 +6,7 @@ import '../../core/errors/api_exception.dart';
 import '../../core/format/money.dart';
 import '../../core/log/app_log.dart';
 import '../../data/models/quick_add.dart';
+import '../../data/ledger_sync_controller.dart';
 import '../../data/providers.dart';
 
 export '../../core/format/money.dart' show parseAmountInput;
@@ -180,9 +181,9 @@ class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
           );
       _log.info('Transaction saved', {'accountId': accountId, 'id': result.id, 'created': result.created});
       await ref.read(settingsStoreProvider).setLastAccountId(accountId);
-      // Only when shown: invalidating starts the provider otherwise.
-      if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
-      ref.invalidate(budgetMonthProvider);
+      // Home and Budget read the phone's copy of the budget: fetch the new
+      // row into it.
+      ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
       state = state.copyWith(saving: false);
       return true;
     } on ApiException catch (e) {

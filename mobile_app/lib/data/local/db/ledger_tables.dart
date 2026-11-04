@@ -42,6 +42,7 @@ class LedgerPayees extends Table {
 
 @TableIndex(name: 'ledger_transactions_account_date', columns: {#accountId, #date})
 @TableIndex(name: 'ledger_transactions_scope_date', columns: {#scope, #date})
+@TableIndex(name: 'ledger_transactions_account_imported', columns: {#accountId, #importedId})
 class LedgerTransactions extends Table {
   TextColumn get id => text()();
   TextColumn get scope => text()();
@@ -74,10 +75,28 @@ class LedgerTransactions extends Table {
   @override
   Set<Column> get primaryKey => {id};
 
+  // Not unique (schema 4): Actual doesn't enforce it, so a pulled budget
+  // can hold two rows with one importedId. LedgerStore still skips a
+  // known importedId when the phone adds rows.
+}
+
+/// An Actual budget's categories, as pulled (schema 4; the phone's own
+/// budget uses the app's categories in app_database.dart). The group is
+/// kept on each row: the budget lists them grouped and in order.
+class LedgerCategories extends Table {
+  TextColumn get scope => text()();
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  BoolColumn get hidden => boolean().withDefault(const Constant(false))();
+  IntColumn get sort => integer()();
+  TextColumn get groupId => text()();
+  TextColumn get groupName => text()();
+  BoolColumn get groupIsIncome => boolean().withDefault(const Constant(false))();
+  BoolColumn get groupHidden => boolean().withDefault(const Constant(false))();
+  IntColumn get groupSort => integer()();
+
   @override
-  List<Set<Column>> get uniqueKeys => [
-    {accountId, importedId},
-  ];
+  Set<Column> get primaryKey => {scope, id};
 }
 
 /// The amount budgeted for a category in a month.

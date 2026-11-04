@@ -40,23 +40,17 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
 
   @override
   AccountPageState build(String accountId) {
-    // The phone's rows change under the screen (an edit here, a statement
-    // saved): reload from the top.
-    ref.listen(ledgerChangesProvider, (_, _) {
-      if (state.onPhone) refresh();
-    });
+    // The rows change under the screen (an edit here, a statement saved,
+    // a sync): reload from the top.
+    ref.listen(ledgerChangesProvider, (_, _) => refresh());
     Future.microtask(refresh);
     return const AccountPageState();
   }
 
-  String? get _budgetSyncId => ref.read(appConfigProvider).budgetSyncId;
-
-  Future<AccountPage> _page(bool onPhone, {String? before}) {
-    if (onPhone) return ref.read(ledgerReportsProvider).accountPage(arg, before: before, limit: pageSize);
-    return ref
-        .read(importerApiProvider)
-        .getAccountPage(arg, budgetSyncId: _budgetSyncId, before: before, limit: pageSize);
-  }
+  /// Always the ledger: the phone's own account, or the copy of an Actual
+  /// one (kept by the sync, Phase 5).
+  Future<AccountPage> _page({String? before}) =>
+      ref.read(ledgerReportsProvider).accountPage(arg, before: before, limit: pageSize);
 
   /// Reloads from the newest transaction.
   Future<void> refresh() async {
@@ -69,7 +63,7 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
     );
     try {
       final onPhone = await ref.read(readsLedgerProvider.future);
-      final page = await _page(onPhone);
+      final page = await _page();
       state = AccountPageState(
         name: page.accountName,
         balanceCents: page.balanceCents,
@@ -101,7 +95,7 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
       onPhone: onPhone,
     );
     try {
-      final page = await _page(onPhone, before: cursor);
+      final page = await _page(before: cursor);
       state = AccountPageState(
         name: page.accountName,
         balanceCents: page.balanceCents,

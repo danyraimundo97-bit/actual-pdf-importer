@@ -1,4 +1,5 @@
 import { ActualAdapter, ActualPort } from '../budget-session';
+import type { LedgerPort } from '../ledger';
 
 /**
  * Test doubles for the port. Deliberately looser than ActualPort: matching
@@ -7,7 +8,9 @@ import { ActualAdapter, ActualPort } from '../budget-session';
  * checking the stub most needs. The one cast lives below, where this is
  * handed to ActualAdapter.
  */
-type FakePort = Partial<Record<keyof ActualPort, (...args: never[]) => Promise<unknown>>>;
+type FakePort = Partial<Record<Exclude<keyof ActualPort, 'ledger'>, (...args: never[]) => Promise<unknown>>> & {
+  ledger?: Partial<Record<keyof LedgerPort, (...args: never[]) => Promise<unknown>>>;
+};
 
 export const SERVER = { serverURL: 'http://fake', password: '', dataDir: './fake' };
 export const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));

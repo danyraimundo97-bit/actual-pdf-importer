@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/ledger_sync_controller.dart';
 import '../data/providers.dart';
 import '../features/categories/category_sync_controller.dart';
 import '../features/import/inbox_controller.dart';
@@ -88,6 +89,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     ref.listen(linkStateProvider, (previous, next) {
       if (next.hasValue && next.valueOrNull != previous?.valueOrNull) {
         ref.read(categorySyncProvider.notifier).syncNow();
+        // And the phone's copy of the budget (local ledger, Phase 5).
+        ref.read(ledgerSyncProvider.notifier).syncNow();
       }
     });
     ref.listen(categoryMemoryRevisionProvider, (_, _) => ref.read(categorySyncProvider.notifier).request());

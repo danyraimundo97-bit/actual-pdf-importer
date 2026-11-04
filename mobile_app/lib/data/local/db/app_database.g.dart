@@ -3128,10 +3128,6 @@ class $LedgerTransactionsTable extends LedgerTransactions
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
-  List<Set<GeneratedColumn>> get uniqueKeys => [
-    {accountId, importedId},
-  ];
-  @override
   LedgerTransaction map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
     return LedgerTransaction(
@@ -4407,7 +4403,7 @@ class LedgerOutboxData extends DataClass
   /// 'account' | 'payee' | 'transaction' | 'budget'.
   final String kind;
 
-  /// The row's id; for a budget amount, '<categoryId>|<YYYY-MM>'.
+  /// The row's id; for a budget amount, `<categoryId>|<YYYY-MM>`.
   final String rowId;
 
   /// 'put' | 'delete'.
@@ -5068,6 +5064,619 @@ class LedgerSyncStateCompanion extends UpdateCompanion<LedgerSyncStateData> {
   }
 }
 
+class $LedgerCategoriesTable extends LedgerCategories
+    with TableInfo<$LedgerCategoriesTable, LedgerCategory> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LedgerCategoriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _scopeMeta = const VerificationMeta('scope');
+  @override
+  late final GeneratedColumn<String> scope = GeneratedColumn<String>(
+    'scope',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hiddenMeta = const VerificationMeta('hidden');
+  @override
+  late final GeneratedColumn<bool> hidden = GeneratedColumn<bool>(
+    'hidden',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("hidden" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _sortMeta = const VerificationMeta('sort');
+  @override
+  late final GeneratedColumn<int> sort = GeneratedColumn<int>(
+    'sort',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _groupIdMeta = const VerificationMeta(
+    'groupId',
+  );
+  @override
+  late final GeneratedColumn<String> groupId = GeneratedColumn<String>(
+    'group_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _groupNameMeta = const VerificationMeta(
+    'groupName',
+  );
+  @override
+  late final GeneratedColumn<String> groupName = GeneratedColumn<String>(
+    'group_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _groupIsIncomeMeta = const VerificationMeta(
+    'groupIsIncome',
+  );
+  @override
+  late final GeneratedColumn<bool> groupIsIncome = GeneratedColumn<bool>(
+    'group_is_income',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("group_is_income" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _groupHiddenMeta = const VerificationMeta(
+    'groupHidden',
+  );
+  @override
+  late final GeneratedColumn<bool> groupHidden = GeneratedColumn<bool>(
+    'group_hidden',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("group_hidden" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _groupSortMeta = const VerificationMeta(
+    'groupSort',
+  );
+  @override
+  late final GeneratedColumn<int> groupSort = GeneratedColumn<int>(
+    'group_sort',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    scope,
+    id,
+    name,
+    hidden,
+    sort,
+    groupId,
+    groupName,
+    groupIsIncome,
+    groupHidden,
+    groupSort,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ledger_categories';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LedgerCategory> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('scope')) {
+      context.handle(
+        _scopeMeta,
+        scope.isAcceptableOrUnknown(data['scope']!, _scopeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_scopeMeta);
+    }
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('hidden')) {
+      context.handle(
+        _hiddenMeta,
+        hidden.isAcceptableOrUnknown(data['hidden']!, _hiddenMeta),
+      );
+    }
+    if (data.containsKey('sort')) {
+      context.handle(
+        _sortMeta,
+        sort.isAcceptableOrUnknown(data['sort']!, _sortMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sortMeta);
+    }
+    if (data.containsKey('group_id')) {
+      context.handle(
+        _groupIdMeta,
+        groupId.isAcceptableOrUnknown(data['group_id']!, _groupIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_groupIdMeta);
+    }
+    if (data.containsKey('group_name')) {
+      context.handle(
+        _groupNameMeta,
+        groupName.isAcceptableOrUnknown(data['group_name']!, _groupNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_groupNameMeta);
+    }
+    if (data.containsKey('group_is_income')) {
+      context.handle(
+        _groupIsIncomeMeta,
+        groupIsIncome.isAcceptableOrUnknown(
+          data['group_is_income']!,
+          _groupIsIncomeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('group_hidden')) {
+      context.handle(
+        _groupHiddenMeta,
+        groupHidden.isAcceptableOrUnknown(
+          data['group_hidden']!,
+          _groupHiddenMeta,
+        ),
+      );
+    }
+    if (data.containsKey('group_sort')) {
+      context.handle(
+        _groupSortMeta,
+        groupSort.isAcceptableOrUnknown(data['group_sort']!, _groupSortMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_groupSortMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {scope, id};
+  @override
+  LedgerCategory map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LedgerCategory(
+      scope: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}scope'],
+      )!,
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      hidden: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}hidden'],
+      )!,
+      sort: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sort'],
+      )!,
+      groupId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}group_id'],
+      )!,
+      groupName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}group_name'],
+      )!,
+      groupIsIncome: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}group_is_income'],
+      )!,
+      groupHidden: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}group_hidden'],
+      )!,
+      groupSort: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}group_sort'],
+      )!,
+    );
+  }
+
+  @override
+  $LedgerCategoriesTable createAlias(String alias) {
+    return $LedgerCategoriesTable(attachedDatabase, alias);
+  }
+}
+
+class LedgerCategory extends DataClass implements Insertable<LedgerCategory> {
+  final String scope;
+  final String id;
+  final String name;
+  final bool hidden;
+  final int sort;
+  final String groupId;
+  final String groupName;
+  final bool groupIsIncome;
+  final bool groupHidden;
+  final int groupSort;
+  const LedgerCategory({
+    required this.scope,
+    required this.id,
+    required this.name,
+    required this.hidden,
+    required this.sort,
+    required this.groupId,
+    required this.groupName,
+    required this.groupIsIncome,
+    required this.groupHidden,
+    required this.groupSort,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['scope'] = Variable<String>(scope);
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['hidden'] = Variable<bool>(hidden);
+    map['sort'] = Variable<int>(sort);
+    map['group_id'] = Variable<String>(groupId);
+    map['group_name'] = Variable<String>(groupName);
+    map['group_is_income'] = Variable<bool>(groupIsIncome);
+    map['group_hidden'] = Variable<bool>(groupHidden);
+    map['group_sort'] = Variable<int>(groupSort);
+    return map;
+  }
+
+  LedgerCategoriesCompanion toCompanion(bool nullToAbsent) {
+    return LedgerCategoriesCompanion(
+      scope: Value(scope),
+      id: Value(id),
+      name: Value(name),
+      hidden: Value(hidden),
+      sort: Value(sort),
+      groupId: Value(groupId),
+      groupName: Value(groupName),
+      groupIsIncome: Value(groupIsIncome),
+      groupHidden: Value(groupHidden),
+      groupSort: Value(groupSort),
+    );
+  }
+
+  factory LedgerCategory.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LedgerCategory(
+      scope: serializer.fromJson<String>(json['scope']),
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      hidden: serializer.fromJson<bool>(json['hidden']),
+      sort: serializer.fromJson<int>(json['sort']),
+      groupId: serializer.fromJson<String>(json['groupId']),
+      groupName: serializer.fromJson<String>(json['groupName']),
+      groupIsIncome: serializer.fromJson<bool>(json['groupIsIncome']),
+      groupHidden: serializer.fromJson<bool>(json['groupHidden']),
+      groupSort: serializer.fromJson<int>(json['groupSort']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'scope': serializer.toJson<String>(scope),
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'hidden': serializer.toJson<bool>(hidden),
+      'sort': serializer.toJson<int>(sort),
+      'groupId': serializer.toJson<String>(groupId),
+      'groupName': serializer.toJson<String>(groupName),
+      'groupIsIncome': serializer.toJson<bool>(groupIsIncome),
+      'groupHidden': serializer.toJson<bool>(groupHidden),
+      'groupSort': serializer.toJson<int>(groupSort),
+    };
+  }
+
+  LedgerCategory copyWith({
+    String? scope,
+    String? id,
+    String? name,
+    bool? hidden,
+    int? sort,
+    String? groupId,
+    String? groupName,
+    bool? groupIsIncome,
+    bool? groupHidden,
+    int? groupSort,
+  }) => LedgerCategory(
+    scope: scope ?? this.scope,
+    id: id ?? this.id,
+    name: name ?? this.name,
+    hidden: hidden ?? this.hidden,
+    sort: sort ?? this.sort,
+    groupId: groupId ?? this.groupId,
+    groupName: groupName ?? this.groupName,
+    groupIsIncome: groupIsIncome ?? this.groupIsIncome,
+    groupHidden: groupHidden ?? this.groupHidden,
+    groupSort: groupSort ?? this.groupSort,
+  );
+  LedgerCategory copyWithCompanion(LedgerCategoriesCompanion data) {
+    return LedgerCategory(
+      scope: data.scope.present ? data.scope.value : this.scope,
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      hidden: data.hidden.present ? data.hidden.value : this.hidden,
+      sort: data.sort.present ? data.sort.value : this.sort,
+      groupId: data.groupId.present ? data.groupId.value : this.groupId,
+      groupName: data.groupName.present ? data.groupName.value : this.groupName,
+      groupIsIncome: data.groupIsIncome.present
+          ? data.groupIsIncome.value
+          : this.groupIsIncome,
+      groupHidden: data.groupHidden.present
+          ? data.groupHidden.value
+          : this.groupHidden,
+      groupSort: data.groupSort.present ? data.groupSort.value : this.groupSort,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LedgerCategory(')
+          ..write('scope: $scope, ')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('hidden: $hidden, ')
+          ..write('sort: $sort, ')
+          ..write('groupId: $groupId, ')
+          ..write('groupName: $groupName, ')
+          ..write('groupIsIncome: $groupIsIncome, ')
+          ..write('groupHidden: $groupHidden, ')
+          ..write('groupSort: $groupSort')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    scope,
+    id,
+    name,
+    hidden,
+    sort,
+    groupId,
+    groupName,
+    groupIsIncome,
+    groupHidden,
+    groupSort,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LedgerCategory &&
+          other.scope == this.scope &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.hidden == this.hidden &&
+          other.sort == this.sort &&
+          other.groupId == this.groupId &&
+          other.groupName == this.groupName &&
+          other.groupIsIncome == this.groupIsIncome &&
+          other.groupHidden == this.groupHidden &&
+          other.groupSort == this.groupSort);
+}
+
+class LedgerCategoriesCompanion extends UpdateCompanion<LedgerCategory> {
+  final Value<String> scope;
+  final Value<String> id;
+  final Value<String> name;
+  final Value<bool> hidden;
+  final Value<int> sort;
+  final Value<String> groupId;
+  final Value<String> groupName;
+  final Value<bool> groupIsIncome;
+  final Value<bool> groupHidden;
+  final Value<int> groupSort;
+  final Value<int> rowid;
+  const LedgerCategoriesCompanion({
+    this.scope = const Value.absent(),
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.hidden = const Value.absent(),
+    this.sort = const Value.absent(),
+    this.groupId = const Value.absent(),
+    this.groupName = const Value.absent(),
+    this.groupIsIncome = const Value.absent(),
+    this.groupHidden = const Value.absent(),
+    this.groupSort = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LedgerCategoriesCompanion.insert({
+    required String scope,
+    required String id,
+    required String name,
+    this.hidden = const Value.absent(),
+    required int sort,
+    required String groupId,
+    required String groupName,
+    this.groupIsIncome = const Value.absent(),
+    this.groupHidden = const Value.absent(),
+    required int groupSort,
+    this.rowid = const Value.absent(),
+  }) : scope = Value(scope),
+       id = Value(id),
+       name = Value(name),
+       sort = Value(sort),
+       groupId = Value(groupId),
+       groupName = Value(groupName),
+       groupSort = Value(groupSort);
+  static Insertable<LedgerCategory> custom({
+    Expression<String>? scope,
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<bool>? hidden,
+    Expression<int>? sort,
+    Expression<String>? groupId,
+    Expression<String>? groupName,
+    Expression<bool>? groupIsIncome,
+    Expression<bool>? groupHidden,
+    Expression<int>? groupSort,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (scope != null) 'scope': scope,
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (hidden != null) 'hidden': hidden,
+      if (sort != null) 'sort': sort,
+      if (groupId != null) 'group_id': groupId,
+      if (groupName != null) 'group_name': groupName,
+      if (groupIsIncome != null) 'group_is_income': groupIsIncome,
+      if (groupHidden != null) 'group_hidden': groupHidden,
+      if (groupSort != null) 'group_sort': groupSort,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LedgerCategoriesCompanion copyWith({
+    Value<String>? scope,
+    Value<String>? id,
+    Value<String>? name,
+    Value<bool>? hidden,
+    Value<int>? sort,
+    Value<String>? groupId,
+    Value<String>? groupName,
+    Value<bool>? groupIsIncome,
+    Value<bool>? groupHidden,
+    Value<int>? groupSort,
+    Value<int>? rowid,
+  }) {
+    return LedgerCategoriesCompanion(
+      scope: scope ?? this.scope,
+      id: id ?? this.id,
+      name: name ?? this.name,
+      hidden: hidden ?? this.hidden,
+      sort: sort ?? this.sort,
+      groupId: groupId ?? this.groupId,
+      groupName: groupName ?? this.groupName,
+      groupIsIncome: groupIsIncome ?? this.groupIsIncome,
+      groupHidden: groupHidden ?? this.groupHidden,
+      groupSort: groupSort ?? this.groupSort,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (scope.present) {
+      map['scope'] = Variable<String>(scope.value);
+    }
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (hidden.present) {
+      map['hidden'] = Variable<bool>(hidden.value);
+    }
+    if (sort.present) {
+      map['sort'] = Variable<int>(sort.value);
+    }
+    if (groupId.present) {
+      map['group_id'] = Variable<String>(groupId.value);
+    }
+    if (groupName.present) {
+      map['group_name'] = Variable<String>(groupName.value);
+    }
+    if (groupIsIncome.present) {
+      map['group_is_income'] = Variable<bool>(groupIsIncome.value);
+    }
+    if (groupHidden.present) {
+      map['group_hidden'] = Variable<bool>(groupHidden.value);
+    }
+    if (groupSort.present) {
+      map['group_sort'] = Variable<int>(groupSort.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LedgerCategoriesCompanion(')
+          ..write('scope: $scope, ')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('hidden: $hidden, ')
+          ..write('sort: $sort, ')
+          ..write('groupId: $groupId, ')
+          ..write('groupName: $groupName, ')
+          ..write('groupIsIncome: $groupIsIncome, ')
+          ..write('groupHidden: $groupHidden, ')
+          ..write('groupSort: $groupSort, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -5086,6 +5695,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $LedgerSyncStateTable ledgerSyncState = $LedgerSyncStateTable(
     this,
   );
+  late final $LedgerCategoriesTable ledgerCategories = $LedgerCategoriesTable(
+    this,
+  );
   late final Index ledgerTransactionsAccountDate = Index(
     'ledger_transactions_account_date',
     'CREATE INDEX ledger_transactions_account_date ON ledger_transactions (account_id, date)',
@@ -5093,6 +5705,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final Index ledgerTransactionsScopeDate = Index(
     'ledger_transactions_scope_date',
     'CREATE INDEX ledger_transactions_scope_date ON ledger_transactions (scope, date)',
+  );
+  late final Index ledgerTransactionsAccountImported = Index(
+    'ledger_transactions_account_imported',
+    'CREATE INDEX ledger_transactions_account_imported ON ledger_transactions (account_id, imported_id)',
   );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
@@ -5109,8 +5725,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     ledgerBudgets,
     ledgerOutbox,
     ledgerSyncState,
+    ledgerCategories,
     ledgerTransactionsAccountDate,
     ledgerTransactionsScopeDate,
+    ledgerTransactionsAccountImported,
   ];
 }
 
@@ -8605,6 +9223,320 @@ typedef $$LedgerSyncStateTableProcessedTableManager =
       LedgerSyncStateData,
       PrefetchHooks Function()
     >;
+typedef $$LedgerCategoriesTableCreateCompanionBuilder =
+    LedgerCategoriesCompanion Function({
+      required String scope,
+      required String id,
+      required String name,
+      Value<bool> hidden,
+      required int sort,
+      required String groupId,
+      required String groupName,
+      Value<bool> groupIsIncome,
+      Value<bool> groupHidden,
+      required int groupSort,
+      Value<int> rowid,
+    });
+typedef $$LedgerCategoriesTableUpdateCompanionBuilder =
+    LedgerCategoriesCompanion Function({
+      Value<String> scope,
+      Value<String> id,
+      Value<String> name,
+      Value<bool> hidden,
+      Value<int> sort,
+      Value<String> groupId,
+      Value<String> groupName,
+      Value<bool> groupIsIncome,
+      Value<bool> groupHidden,
+      Value<int> groupSort,
+      Value<int> rowid,
+    });
+
+class $$LedgerCategoriesTableFilterComposer
+    extends Composer<_$AppDatabase, $LedgerCategoriesTable> {
+  $$LedgerCategoriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get scope => $composableBuilder(
+    column: $table.scope,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get hidden => $composableBuilder(
+    column: $table.hidden,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sort => $composableBuilder(
+    column: $table.sort,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get groupId => $composableBuilder(
+    column: $table.groupId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get groupName => $composableBuilder(
+    column: $table.groupName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get groupIsIncome => $composableBuilder(
+    column: $table.groupIsIncome,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get groupHidden => $composableBuilder(
+    column: $table.groupHidden,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get groupSort => $composableBuilder(
+    column: $table.groupSort,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LedgerCategoriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $LedgerCategoriesTable> {
+  $$LedgerCategoriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get scope => $composableBuilder(
+    column: $table.scope,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get hidden => $composableBuilder(
+    column: $table.hidden,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sort => $composableBuilder(
+    column: $table.sort,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get groupId => $composableBuilder(
+    column: $table.groupId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get groupName => $composableBuilder(
+    column: $table.groupName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get groupIsIncome => $composableBuilder(
+    column: $table.groupIsIncome,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get groupHidden => $composableBuilder(
+    column: $table.groupHidden,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get groupSort => $composableBuilder(
+    column: $table.groupSort,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LedgerCategoriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LedgerCategoriesTable> {
+  $$LedgerCategoriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get scope =>
+      $composableBuilder(column: $table.scope, builder: (column) => column);
+
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<bool> get hidden =>
+      $composableBuilder(column: $table.hidden, builder: (column) => column);
+
+  GeneratedColumn<int> get sort =>
+      $composableBuilder(column: $table.sort, builder: (column) => column);
+
+  GeneratedColumn<String> get groupId =>
+      $composableBuilder(column: $table.groupId, builder: (column) => column);
+
+  GeneratedColumn<String> get groupName =>
+      $composableBuilder(column: $table.groupName, builder: (column) => column);
+
+  GeneratedColumn<bool> get groupIsIncome => $composableBuilder(
+    column: $table.groupIsIncome,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get groupHidden => $composableBuilder(
+    column: $table.groupHidden,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get groupSort =>
+      $composableBuilder(column: $table.groupSort, builder: (column) => column);
+}
+
+class $$LedgerCategoriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LedgerCategoriesTable,
+          LedgerCategory,
+          $$LedgerCategoriesTableFilterComposer,
+          $$LedgerCategoriesTableOrderingComposer,
+          $$LedgerCategoriesTableAnnotationComposer,
+          $$LedgerCategoriesTableCreateCompanionBuilder,
+          $$LedgerCategoriesTableUpdateCompanionBuilder,
+          (
+            LedgerCategory,
+            BaseReferences<
+              _$AppDatabase,
+              $LedgerCategoriesTable,
+              LedgerCategory
+            >,
+          ),
+          LedgerCategory,
+          PrefetchHooks Function()
+        > {
+  $$LedgerCategoriesTableTableManager(
+    _$AppDatabase db,
+    $LedgerCategoriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LedgerCategoriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LedgerCategoriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LedgerCategoriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> scope = const Value.absent(),
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<bool> hidden = const Value.absent(),
+                Value<int> sort = const Value.absent(),
+                Value<String> groupId = const Value.absent(),
+                Value<String> groupName = const Value.absent(),
+                Value<bool> groupIsIncome = const Value.absent(),
+                Value<bool> groupHidden = const Value.absent(),
+                Value<int> groupSort = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LedgerCategoriesCompanion(
+                scope: scope,
+                id: id,
+                name: name,
+                hidden: hidden,
+                sort: sort,
+                groupId: groupId,
+                groupName: groupName,
+                groupIsIncome: groupIsIncome,
+                groupHidden: groupHidden,
+                groupSort: groupSort,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String scope,
+                required String id,
+                required String name,
+                Value<bool> hidden = const Value.absent(),
+                required int sort,
+                required String groupId,
+                required String groupName,
+                Value<bool> groupIsIncome = const Value.absent(),
+                Value<bool> groupHidden = const Value.absent(),
+                required int groupSort,
+                Value<int> rowid = const Value.absent(),
+              }) => LedgerCategoriesCompanion.insert(
+                scope: scope,
+                id: id,
+                name: name,
+                hidden: hidden,
+                sort: sort,
+                groupId: groupId,
+                groupName: groupName,
+                groupIsIncome: groupIsIncome,
+                groupHidden: groupHidden,
+                groupSort: groupSort,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LedgerCategoriesTable, LedgerCategory>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $LedgerCategoriesTable,
+                    LedgerCategory
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LedgerCategoriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LedgerCategoriesTable,
+      LedgerCategory,
+      $$LedgerCategoriesTableFilterComposer,
+      $$LedgerCategoriesTableOrderingComposer,
+      $$LedgerCategoriesTableAnnotationComposer,
+      $$LedgerCategoriesTableCreateCompanionBuilder,
+      $$LedgerCategoriesTableUpdateCompanionBuilder,
+      (
+        LedgerCategory,
+        BaseReferences<_$AppDatabase, $LedgerCategoriesTable, LedgerCategory>,
+      ),
+      LedgerCategory,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -8629,4 +9561,6 @@ class $AppDatabaseManager {
       $$LedgerOutboxTableTableManager(_db, _db.ledgerOutbox);
   $$LedgerSyncStateTableTableManager get ledgerSyncState =>
       $$LedgerSyncStateTableTableManager(_db, _db.ledgerSyncState);
+  $$LedgerCategoriesTableTableManager get ledgerCategories =>
+      $$LedgerCategoriesTableTableManager(_db, _db.ledgerCategories);
 }

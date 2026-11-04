@@ -10,7 +10,8 @@ import '../../../data/models/budget_month.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/error_retry.dart';
-import '../../../shared/widgets/on_phone_status.dart';
+import '../../../data/ledger_sync_controller.dart';
+import '../../../shared/widgets/ledger_status.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../widgets/budget_amount_sheet.dart';
 
@@ -91,10 +92,14 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                     onRetry: () => ref.invalidate(budgetMonthProvider(_month)),
                   ),
             data: (data) => RefreshIndicator(
-              onRefresh: () => ref.refresh(budgetMonthProvider(_month).future),
+              onRefresh: () async {
+                await ref.read(ledgerSyncProvider.notifier).syncNow();
+                return ref.refresh(budgetMonthProvider(_month).future);
+              },
               child: _BudgetBody(
                 data: data,
                 onMonth: (m) => setState(() => _month = m),
+                onPhone: onPhone,
                 onEdit: onPhone ? (c) => _edit(data.month, c) : null,
                 onCopyLastMonth: onPhone ? () => _copyLastMonth(data.month) : null,
               ),
@@ -113,7 +118,16 @@ class _BudgetBody extends StatelessWidget {
   final ValueChanged<BudgetCategory>? onEdit;
   final VoidCallback? onCopyLastMonth;
 
-  const _BudgetBody({required this.data, required this.onMonth, this.onEdit, this.onCopyLastMonth});
+  /// The phone's own budget (else a copy of the Actual one).
+  final bool onPhone;
+
+  const _BudgetBody({
+    required this.data,
+    required this.onMonth,
+    this.onPhone = false,
+    this.onEdit,
+    this.onCopyLastMonth,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -149,14 +163,16 @@ class _BudgetBody extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
           child: _Summary(data: data),
         ),
-        if (onEdit != null) ...[
+        ...[
           const SizedBox(height: Space.md),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
             child: Row(
               children: [
-                const Expanded(child: OnPhoneStatus()),
-                if (data.totalBudgetedCents == 0 && data.month.compareTo(data.firstMonth) > 0)
+                Expanded(child: LedgerStatus(onPhone: onPhone)),
+                if (onCopyLastMonth != null &&
+                    data.totalBudgetedCents == 0 &&
+                    data.month.compareTo(data.firstMonth) > 0)
                   TextButton.icon(
                     onPressed: onCopyLastMonth,
                     icon: const Icon(Icons.content_copy_rounded, size: 16),

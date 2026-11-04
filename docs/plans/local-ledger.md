@@ -425,6 +425,83 @@ Tests: backend route tests against the fake `ActualAdapter`, and on the phone, s
 covering push order, a run that stops partway and continues, pending rows surviving a pull, and the
 first-connection move.
 
+### Phase 5 in three parts
+
+Phase 5 is built and committed in three parts:
+
+- **5a, mirror:** the pull. With Actual connected, the phone keeps a copy of the budget, and Home,
+  Budget and the account screen read it, offline too. Read-only on the phone.
+- **5b, push:** the phone's changes to that copy go up to Actual. Budget amounts and account rows
+  become editable with Actual too, and Import and quick add write to the ledger first.
+- **5c, first connection:** the phone's own accounts and rows (scope `''`) move into the budget.
+
+### Phase 5a as built (2026-11-04)
+
+- **Backend, `GET /ledger/pull`** (`src/ledger.ts`):
+  - **One budget turn per pull.** The cursor is `{epoch, lastId}` on Actual's change log, as decided
+    in Phase 0.
+  - **Epochs:** they live in `ledger-epochs.json` (mode 0600) next to the category DB, one per
+    budget. A new epoch starts when the log's first entry changes: a fresh cache or "Reset sync"
+    starts the log again from id 1. An empty log that starts filling keeps its epoch.
+  - **Full or changes:** another epoch, no cursor, or a cursor past the log's end gets a full pull.
+    Otherwise the pull sends only the transactions and budget amounts the log names since `lastId`,
+    removed ones included as tombstones. Accounts, category groups, payees and the budget's mode
+    always come whole, because they're small.
+  - **The app's own soft delete:** a transaction removed by this app (its note starts with
+    `[Removed via PDF importer`) is sent as removed.
+  - **Gzipped** when the client accepts it, using `zlib`, with no new dependency.
+  - Reads Actual's internals, so `actual-adapter.ts` is the only file that does it. `init()`'s handle
+    is kept there, behind `ActualPort.ledger` (`LedgerPort`), with SELECTs only: `messages_crdt`,
+    the `budgetType` preference, and `zero_budgets`/`reflect_budgets`. Transactions come through
+    `aqlQuery` (`splits: 'all'`, `withDead()` for changes).
+  - Tests (`ledger.test.ts`, 7) cover full and delta pulls, the soft delete, a new epoch, a cursor
+    past the end, and the epoch file.
+- **Checked against the real SDK** (the Phase 0 scratch server, script in the session scratchpad):
+  - a full pull of 3,002 transactions and 145 budget amounts in 300 ms, opening the budget included;
+  - after one edit through the API, the next pull returned that transaction alone, in 9 ms.
+- **Budget numbers checked against Actual** (the item Phase 4 left open). The scratch budget, an
+  envelope budget, was pulled into the phone's database. For each of its 39 months, the phone's
+  `buildLedgerBudgetMonth` gave the same values as Actual's own `getBudgetMonth`, as the backend
+  shapes it: To budget, totals, income, and every category's budgeted, spent and left. **No
+  differences.**
+  - Cases covered: 144 overspent category-months, 11 carried leftovers, 36 months with a negative
+    To budget, carryover flags (set on one category, which Actual carries into the next 15
+    months), and an uncategorized income (Actual leaves it out of To budget, and so does the
+    phone).
+  - Not checked: a tracking ("simple limits") budget. The API can't switch a budget's type, so that
+    needs a budget made as tracking in Actual's web app.
+- **App:**
+  - **Schema 4:** `LedgerCategories` holds an Actual budget's categories, with their group, order
+    and hidden flags. `importedId` is no longer unique per account, because Actual doesn't enforce
+    it and a pulled budget can repeat one; it's an index now. A version 3 file is rebuilt with
+    `alterTable`, and the migration is tested.
+  - **`LedgerSync.pull`** (`lib/data/local/ledger_sync.dart`) applies a pull in one database
+    transaction:
+    - accounts, payees and categories are replaced, and missing ones are marked removed (rows made
+      on the phone, `acct:`/`payee:`, are left alone);
+    - a full pull replaces the transactions and budget amounts, and a delta upserts them;
+    - an account Actual deleted that old transactions still use gets a removed stand-in;
+    - rows with a pending outbox entry keep the phone's version;
+    - pulled rows never go into the outbox.
+  - **`LedgerSyncController`** (`lib/data/ledger_sync_controller.dart`):
+    - one run at a time;
+    - triggered by AppShell on connection changes (next to the category sync), after an import, a
+      removed import or a quick add, and by pull-to-refresh on Home and Budget;
+    - `ensurePulled` makes a screen wait for the first copy, so an empty copy never reads as an
+      empty budget.
+  - **Screens:** `ledgerScopeProvider` picks the connected budget's sync id, or `''` without
+    Actual. Home, Budget and the account screen now always read the ledger, so the app no longer
+    calls `/dashboard`, `/budget-month` or `/accounts/:id/transactions`. The backend keeps them for
+    now; remove them after a release. The status line (`LedgerStatus`) says "Synced 5 min ago",
+    "Syncing with Actual…", or "Couldn't reach Actual · synced …".
+  - **Still read-only with Actual:** editing there comes in 5b.
+  - Tests (`ledger_sync_test.dart`, 6) cover a first pull then a delta, a full pull replacing rows
+    with scopes kept apart, pending rows surviving a pull, a removed account, the budget mode, and
+    the 3 → 4 migration.
+  - 177 app tests pass, 1 skipped. The analyzer shows the same 15 notes as before. Backend: 110 of
+    111 pass. The one failure is the known Node 26 "bad XRef entry" in `pdf-password.test.ts`
+    (Todo).
+
 ## Phase 6: Quick add offline
 
 - Quick add writes to the ledger (accounts and categories from the phone, `app-<clientId>`) and
