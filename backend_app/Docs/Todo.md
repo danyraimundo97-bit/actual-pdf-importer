@@ -24,8 +24,12 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 - **Configurable parsers**, so other banks can be supported without writing code (today "add a
   bank" = a new Dart parser in `mobile_app/packages/statement_parser` + registering it).
 - **Edit and remove transactions in the app** (not only imports). Needs the soft-delete rule below
-  and better auth first.
-- **Offline queue for quick add.** The `clientId` design already makes a retry safe.
+  and better auth first. Planned in `docs/plans/local-ledger.md` (Phases 4–5).
+- **Offline queue for quick add.** Planned in `docs/plans/local-ledger.md` (Phase 6).
+- **Local ledger** (`docs/plans/local-ledger.md`): the phone keeps accounts, transactions and budget
+  amounts in an encrypted database, so Home and Budget work without Actual, and syncs both ways with
+  Actual once it's connected. Budget style is a setting (simple monthly limits or envelopes),
+  explained in the guide.
 
 ## 2. Backend as the Actual gateway
 
@@ -92,7 +96,11 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 - **`importedId` on Flutter web:** check the 32-bit hash when compiled to JS (`toSigned(32)`).
   Android and desktop are covered by the tests.
 - **Budget tab:** tell tracking and envelope budgets apart (both render from the same
-  `getBudgetMonth` fields today).
+  `getBudgetMonth` fields today). Covered by the local ledger's budget style (Phases 4 and 7).
+- **Local ledger on a backend without Actual:** copy the phone's ledger to the backend when there's
+  a backend but no Actual, so the backend's scheduled backups include it and a second phone gets it.
+  Left for later (decided 2026-11-04): a phone with a backend normally connects Actual too, and one
+  with neither backs up with its own export file.
 
 ## 6. Small items
 
