@@ -1,5 +1,4 @@
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
 
 import 'preset_categories.dart';
 
@@ -71,7 +70,9 @@ class PayeeCategories extends Table {
 
 @DriftDatabase(tables: [CategoryGroups, Categories, CategoryLinks, PayeeCategories])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase([QueryExecutor? executor]) : super(executor ?? driftDatabase(name: 'app'));
+  /// The app opens it with `openAppDatabaseConnection` (encrypted); tests
+  /// pass `NativeDatabase.memory()`.
+  AppDatabase(super.executor);
 
   @override
   int get schemaVersion => 2;

@@ -27,7 +27,8 @@ or without a connection. When Actual is connected, the ledger **syncs with it bo
 3. **Copying the ledger to a backend without Actual is left for later** (`backend_app/Docs/Todo.md`).
    Usually a phone with a backend also has Actual; a phone with neither backs up with its own export
    file.
-4. **The database is encrypted** (SQLCipher) from the start, before it holds any amounts.
+4. **The database is encrypted** from the start, before it holds any amounts. It uses SQLite3MultipleCiphers in
+   the end, not SQLCipher (see "Phase 1 as built").
 
 ### The two budget styles, in one example
 
@@ -165,6 +166,55 @@ for all three.
   sync with Actual.
 - Web keeps the unencrypted wasm database (SQLCipher isn't available there). This is noted in the
   Flutter-web Todo item.
+
+### Phase 1 as built (2026-11-04)
+
+- **SQLite3MultipleCiphers, not SQLCipher.** `package:sqlite3` 3.x (already in the app through
+  drift) bundles both through its build hook, and `sqlcipher_flutter_libs` is obsolete for it. The
+  package recommends `sqlite3mc`: a newer SQLite, no OpenSSL, and a wasm build for the web if that's
+  wanted later. It's selected in `pubspec.yaml` (`hooks: user_defines: sqlite3: source: sqlite3mc`),
+  and `sqlite3` is now a direct dependency.
+- `lib/data/local/db/database_file.dart`:
+  - `applyDatabaseKey` runs `PRAGMA hexkey` with a key checked to be 64 hex characters. It refuses
+    to run on a SQLite without encryption, which is checked once on an in-memory database.
+  - `prepareDatabaseFile` runs on a background isolate before drift opens the file. The outcome
+    (`DatabaseOpening`) is one of:
+    - `created`;
+    - `opened`;
+    - `encrypted`: a plain file was encrypted with `PRAGMA hexrekey`. A `.pre-encryption` copy is
+      kept until the file has been read back, and put back on any failure;
+    - `reset`: the key doesn't open the file. It's renamed to `app.sqlite.unreadable` (one copy
+      kept, in case the key turns up) and the app starts empty.
+- `open_connection_native.dart` keeps `drift_flutter`'s opener and its file
+  (`<documents>/app.sqlite`, so existing installs are converted, not replaced), and passes the key
+  in `DriftNativeOptions.setup`. The options are built in a top-level function, so the closures
+  sent to drift's isolate only hold two strings. The web (`open_connection_web.dart`) keeps
+  `driftDatabase(name: 'app')` unencrypted.
+- `SecretStore.databaseKey()` creates the key once (32 bytes from `Random.secure()`).
+  `clearAll()` (the dev page's "Wipe everything") now keeps it, because the database isn't wiped
+  there and couldn't be opened without it.
+- On `reset`:
+  - the category sync positions are cleared (`SettingsStore.clearCategorySync`), so a backend
+    refills the categories and memory on the next sync instead of thinking the phone has them;
+  - `AppShell` says once: "This phone's data was reset", pointing to the next sync and to
+    Settings › Backups.
+- **Android Auto Backup** (`allowBackup` is on by default) copies `app.sqlite` to the user's Google
+  backup. It is now encrypted there. Restored on a new phone, it lands without its key, because
+  Keystore-backed secure storage isn't restored, so it takes the `reset` path, as intended.
+- Tests (`test/database_encryption_test.dart`, 7) use the real encrypted SQLite on the host:
+  - a new file isn't plain and opens again;
+  - a plain schema 2 file with a user category is encrypted and keeps it;
+  - a wrong key sets the file aside, and the right key still opens the copy;
+  - a malformed key is refused;
+  - the drift options can be sent to an isolate;
+  - the key is created once and survives "Wipe everything".
+- App tests: 129 pass, 1 skipped. The analyzer shows the same 15 notes as before.
+- **Not verified here:** an Android build. This machine has no Android SDK, so the first run on the
+  phone is the check:
+  - an existing install upgrades with its categories and memory intact;
+  - a fresh install works;
+  - `adb shell run-as … head -c 16 files/app.sqlite`, or the documents directory, shows no
+    `SQLite format 3` header.
 
 ## Phase 2: Ledger store and accounts
 

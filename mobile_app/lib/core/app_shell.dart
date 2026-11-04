@@ -36,6 +36,29 @@ class _AppShellState extends ConsumerState<AppShell> {
       if (pdf != null) _receive(pdf);
     });
     _shareService.listen(_receive);
+    if (ref.read(databaseWasResetProvider)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _explainDatabaseReset());
+    }
+  }
+
+  /// The database couldn't be opened with its key (docs/plans/local-ledger.md,
+  /// Phase 1) and the app started with an empty one. Said once.
+  Future<void> _explainDatabaseReset() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("This phone's data was reset"),
+        content: const Text(
+          "The app couldn't open its data on this phone, so it started again with none. With a backend, "
+          'your categories and category memory come back on the next sync. A backup file can be '
+          'restored in Settings › Backups.',
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+      ),
+    );
+    await ref.read(settingsStoreProvider).setDatabaseWasReset(false);
+    ref.read(databaseWasResetProvider.notifier).state = false;
   }
 
   @override
@@ -68,6 +91,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
     });
     ref.listen(categoryMemoryRevisionProvider, (_, _) => ref.read(categorySyncProvider.notifier).request());
+    ref.listen(databaseWasResetProvider, (previous, next) {
+      if (next && previous != true) _explainDatabaseReset();
+    });
 
     final inboxWaiting = ref.watch(
       inboxProvider.select(

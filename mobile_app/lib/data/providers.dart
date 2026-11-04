@@ -7,7 +7,9 @@ import 'api/backups_api.dart';
 import 'api/categories_api.dart';
 import 'api/importer_api.dart';
 import 'local/db/app_database.dart';
+import 'local/db/database_opening.dart';
 import 'local/db/local_category_store.dart';
+import 'local/db/open_connection.dart';
 import 'local/import_history_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
@@ -120,13 +122,31 @@ final importerApiProvider = Provider<ImporterApi>((ref) {
   return ImporterApi(ref.watch(apiClientProvider));
 });
 
-/// The app's own database (categories, category memory). One per app run;
-/// tests override it with `AppDatabase(NativeDatabase.memory())`.
+/// The app's own database (categories, category memory), encrypted with a
+/// key from [SecretStore]. One per app run; tests override it with
+/// `AppDatabase(NativeDatabase.memory())`.
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
+  final settings = ref.watch(settingsStoreProvider);
+  final db = AppDatabase(
+    openAppDatabaseConnection(
+      key: ref.watch(secretStoreProvider).databaseKey,
+      onOpened: (outcome) async {
+        if (outcome != DatabaseOpening.reset) return;
+        // Started empty: the backend's copy (if any) comes back with the
+        // next category sync, from the start.
+        await settings.clearCategorySync();
+        await settings.setDatabaseWasReset(true);
+        ref.read(databaseWasResetProvider.notifier).state = true;
+      },
+    ),
+  );
   ref.onDispose(db.close);
   return db;
 });
+
+/// True once the database couldn't be opened with its key and the app
+/// started with an empty one, until the user has been told (AppShell).
+final databaseWasResetProvider = StateProvider<bool>((ref) => ref.watch(settingsStoreProvider).databaseWasReset);
 
 final localCategoryStoreProvider = Provider<LocalCategoryStore>((ref) {
   return LocalCategoryStore(ref.watch(appDatabaseProvider));

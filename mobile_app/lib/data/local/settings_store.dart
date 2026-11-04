@@ -13,6 +13,7 @@ class SettingsStore {
   static const _kSkippedMatchesPrefix = 'category_match_skipped:';
   static const _kSyncCursorPrefix = 'category_sync_cursor:';
   static const _kSyncWatermarkPrefix = 'category_sync_watermark:';
+  static const _kDatabaseWasReset = 'database_was_reset';
 
   final SharedPreferences _prefs;
 
@@ -62,6 +63,19 @@ class SettingsStore {
     await _prefs.setInt('$_kSyncCursorPrefix$budgetKey', cursor);
     await _prefs.setInt('$_kSyncWatermarkPrefix$budgetKey', watermark);
   }
+
+  /// Forgets every budget's category sync position, so the next sync
+  /// brings everything back from the backend (after the database was reset).
+  Future<void> clearCategorySync() async {
+    for (final key in _prefs.getKeys().toList()) {
+      if (key.startsWith(_kSyncCursorPrefix) || key.startsWith(_kSyncWatermarkPrefix)) await _prefs.remove(key);
+    }
+  }
+
+  /// Set when the database couldn't be opened with its key and the app
+  /// started with an empty one; cleared once the user has been told.
+  bool get databaseWasReset => _prefs.getBool(_kDatabaseWasReset) ?? false;
+  Future<void> setDatabaseWasReset(bool value) => _prefs.setBool(_kDatabaseWasReset, value);
 
   Future<void> clear() => _prefs.clear();
 }

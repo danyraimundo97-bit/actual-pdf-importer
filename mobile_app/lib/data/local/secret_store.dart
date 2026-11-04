@@ -1,13 +1,16 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'db/database_opening.dart' show newDatabaseKey;
+
 /// Anything that must never sit in plain shared_preferences: the API
 /// token, per-budget end-to-end-encryption passwords, and (optionally)
-/// remembered statement PDF passwords. See SettingsStore for everything
-/// else.
+/// remembered statement PDF passwords, and the app database's key. See
+/// SettingsStore for everything else.
 class SecretStore {
   static const _kApiToken = 'api_token';
   static const _kBudgetPasswordPrefix = 'budget_password_'; // + syncId
   static const _kPdfPasswordPrefix = 'pdf_password_'; // + bankId
+  static const _kDatabaseKey = 'database_key';
 
   final FlutterSecureStorage _storage;
 
@@ -26,8 +29,26 @@ class SecretStore {
   Future<void> setPdfPassword(String bankId, String password) =>
       _storage.write(key: '$_kPdfPasswordPrefix$bankId', value: password);
 
+  /// The app database's encryption key (64 hex characters), created on
+  /// first use. Losing it makes the database unreadable, so nothing else
+  /// here deletes it.
+  Future<String> databaseKey() async {
+    final existing = await _storage.read(key: _kDatabaseKey);
+    if (existing != null) return existing;
+    final key = newDatabaseKey();
+    await _storage.write(key: _kDatabaseKey, value: key);
+    return key;
+  }
+
   /// Dev page "wipe everything": token, budget and statement passwords.
-  Future<void> clearAll() => _storage.deleteAll();
+  /// Keeps the database key: the database isn't wiped, and without its key
+  /// it couldn't be opened again.
+  Future<void> clearAll() async {
+    final all = await _storage.readAll();
+    for (final key in all.keys.toList()) {
+      if (key != _kDatabaseKey) await _storage.delete(key: key);
+    }
+  }
 
   Future<void> forgetAllPdfPasswords() async {
     final all = await _storage.readAll();

@@ -42,6 +42,8 @@ dependencies:
     path: packages/statement_parser
   drift: ^2.35.3
   drift_flutter: ^0.3.1
+  # Opened directly to encrypt the database file (lib/data/local/db/database_file.dart).
+  sqlite3: ^3.5.2
 
 dev_dependencies:
   flutter_test:
@@ -49,6 +51,14 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   drift_dev: ^2.35.2
   build_runner: ^2.17.1
+
+# The app database is encrypted (docs/plans/local-ledger.md, Phase 1):
+# package:sqlite3's build hook bundles SQLite3MultipleCiphers instead of plain
+# SQLite. applyDatabaseKey refuses to open the database without it.
+hooks:
+  user_defines:
+    sqlite3:
+      source: sqlite3mc
 
 flutter:
   uses-material-design: true

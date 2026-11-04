@@ -93,6 +93,20 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
   - The backend running `learn-from-actual` by itself when a budget's memory is empty (it needs an
     account and dates; the button is there).
   - A progress sheet for "Sync with the backend" (it runs in the background and only logs counts).
+- **Database encryption** (`docs/plans/local-ledger.md`, Phase 1 as built):
+  - **Method:** SQLite3MultipleCiphers (`sqlite3` build-hook option `source: sqlite3mc` in
+    `pubspec.yaml`), with its default cipher (ChaCha20-Poly1305). Changing the cipher later means a
+    `PRAGMA rekey` of every phone's file. Check `sqlite3mc`'s licence and the bundled SQLite version
+    when bumping `sqlite3`.
+  - **Key:** 32 random bytes, only in the phone's secure storage (`SecretStore.databaseKey()`). If it's
+    lost (storage cleared, app data restored to a new phone by Android's Auto Backup), the database
+    is set aside and the app starts empty. Anything that only lived on the phone is then gone.
+    Decide whether to offer a recovery path: put the key in the app-data backup file, protected by a
+    passphrase the user chooses, or show it once to write down.
+  - **Check on the phone:** an existing install upgrades with its categories and memory intact, a
+    fresh install works, and the file's first 16 bytes aren't `SQLite format 3`. No Android SDK on
+    the dev machine, so the APK build wasn't checked there.
+  - **Web** stays unencrypted (`open_connection_web.dart`). `sqlite3mc.wasm` exists if it's wanted.
 - **`importedId` on Flutter web:** check the 32-bit hash when compiled to JS (`toSigned(32)`).
   Android and desktop are covered by the tests.
 - **Budget tab:** tell tracking and envelope budgets apart (both render from the same
