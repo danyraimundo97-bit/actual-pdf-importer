@@ -155,8 +155,14 @@ void main() {
     late _FakeSecretStore secrets;
     late SharedPreferences prefs;
 
-    Future<void> pump(WidgetTester tester, {Map<String, Object> values = const {}}) async {
-      await tester.binding.setSurfaceSize(const Size(800, 2000));
+    Future<void> pump(
+      WidgetTester tester, {
+      Map<String, Object> values = const {},
+      Size size = const Size(800, 2000),
+      double textScale = 1,
+      bool dark = false,
+    }) async {
+      await tester.binding.setSurfaceSize(size);
       addTearDown(() => tester.binding.setSurfaceSize(null));
       SharedPreferences.setMockInitialValues({'onboarded': true, ...values});
       prefs = await SharedPreferences.getInstance();
@@ -186,7 +192,14 @@ void main() {
             secretStoreProvider.overrideWithValue(secrets),
             appDatabaseProvider.overrideWithValue(db),
           ],
-          child: MaterialApp.router(theme: AppTheme.light(), routerConfig: router),
+          child: MaterialApp.router(
+            theme: dark ? AppTheme.dark() : AppTheme.light(),
+            routerConfig: router,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: child!,
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -282,5 +295,35 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('BACKUPS'), findsOneWidget);
     });
+
+    for (final dark in [false, true]) {
+      testWidgets('320dp wide at 200% text (${dark ? 'dark' : 'light'}): nothing overflows', (tester) async {
+        await pump(tester, values: connected, size: const Size(320, 640), textScale: 2, dark: dark);
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(find.text('Run setup again'), 200);
+        expect(tester.takeException(), isNull);
+
+        await tester.scrollUntilVisible(find.text('Backend'), -200);
+        await tester.drag(find.byType(ListView), const Offset(0, 2000));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Backend'));
+        await tester.pumpAndSettle();
+        expect(find.text('Save and test'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Actual'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Budget'));
+        await tester.pumpAndSettle();
+        expect(find.text('Side Hustle'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

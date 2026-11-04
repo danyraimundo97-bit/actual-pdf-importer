@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -124,6 +125,8 @@ class DevScreen extends ConsumerWidget {
             config.budgetName == null ? 'not set' : '${config.budgetName} (${config.budgetSyncId})',
           ),
           _KeyValue('Onboarded', config.onboarded ? 'yes' : 'no'),
+          const SizedBox(height: Space.md),
+          const _SlowMotionSwitch(),
           const SizedBox(height: Space.xxl),
           Text('Preset connection', style: context.text.titleLarge),
           const SizedBox(height: Space.md),
@@ -213,6 +216,26 @@ class _KeyValue extends StatelessWidget {
           Expanded(child: SelectableText(value, style: figures(context.text.bodyMedium))),
         ],
       ),
+    );
+  }
+}
+
+/// Plays every animation 5× slower, to check press and sheet motion by eye.
+class _SlowMotionSwitch extends StatefulWidget {
+  const _SlowMotionSwitch();
+
+  @override
+  State<_SlowMotionSwitch> createState() => _SlowMotionSwitchState();
+}
+
+class _SlowMotionSwitchState extends State<_SlowMotionSwitch> {
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: const Text('Slow motion (5×)'),
+      value: timeDilation > 1,
+      onChanged: (on) => setState(() => timeDilation = on ? 5 : 1),
     );
   }
 }

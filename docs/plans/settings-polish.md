@@ -211,3 +211,23 @@ before any Flutter code.**
 - Tests: `test/settings_test.dart` (10). App total: 119 pass, 1 skipped.
 - Left for Phase 3/4: Emil's review table, 200% text, TalkBack, 320dp width, slow motion and the
   phone check.
+
+### Phase 3 (done in code; the by-eye part is on the phone)
+
+Review of the new widgets against Emil's checklist:
+
+| Before | After | Why |
+| --- | --- | --- |
+| Settings buttons with Material's default press only | `SettingsRow` content scales to 0.98 over 120ms with `Motion.easeOut`; ink stays full-size | Feedback that the row heard the tap, without moving the hit area |
+| Sheets with Material's default curve and timing | Budget sheet: `Motion.drawer`, 300ms in and 200ms out | Exit faster than entry; the drawer curve feels native |
+| Status shown as text only, swapped instantly | `StatusDot`: color crossfade 180ms; label fades with a ~4px rise; "off" is hollow | It's a state change, so it animates; meaning never depends on color alone |
+| `AnimatedSize` with `Curves.easeOutCubic` 200ms | `Motion.small` with `Motion.easeOut`, zero under reduced motion | One curve and duration set across the app |
+| No entrance animation | Still none | The tab is opened many times a day |
+| Reduced motion only partly respected | No scale, no slide, sheet without animation; short fades kept | Movement is what reduced motion asks to stop |
+
+Checks:
+- 320dp width at 200% text, in light and dark, across the overview, both sub-screens and the
+  sheet: no overflow (a test in `settings_test.dart`).
+- The status is read out as words with the row's title (a semantics test).
+- `/dev` has a "Slow motion (5×)" switch (`timeDilation`) for looking at the press and the
+  sheet on the phone.
