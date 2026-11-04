@@ -14,28 +14,6 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 
 ## 1. App features
 
-- **Core of the app**, in likely priority order:
-  - Add a transaction in seconds (e.g. a cash purchase).
-  - Balances and recent transactions (the dashboard is a start).
-  - This month's budget: how much is left in each category.
-  - Statement import with category memory (already exists).
-- **Bring the PDF parser into the Flutter app.** Parse on the phone instead of the backend: the PDF
-  never leaves the device, it works offline, and reading a statement no longer needs the backend.
-  - Port the three regex parsers (`activobank`, `moey`, `traderepublic`) to Dart.
-  - **Text extraction:** the parsers depend on the exact text `pdf-parse` (pdf.js) produces: glued
-    columns, wrapped lines, page headers landing mid-movement. A Dart library (e.g. `pdfrx`, or
-    `syncfusion_flutter_pdf` — check its license) will produce different text, so each parser has
-    to be re-validated against real statements with the balance reconciliation in `HowtoTest.md`.
-  - **`importedId` must match the backend exactly:** same basis (`date|amount|payee`), same 32-bit
-    hash (including the `| 0` overflow) and the same occurrence numbering. Use the golden ids in
-    `actual.test.ts` as shared tests. A different id makes every statement already imported come
-    back as duplicates.
-  - Password-protected PDFs: confirm the Dart library opens them.
-  - The AI parser stays on the backend (API keys can't ship in the app).
-  - Category suggestions come from the backend (`categorydb`) during `/parse` today. With parsing
-    in the app, it needs an endpoint that takes payees and returns suggestions.
-  - Transition: keep the backend's `POST /parse` until the Dart version passes the same fixtures;
-    ideally shared text fixtures, run by both test suites.
 - **Restore a removed import.** Removing an import is a soft delete (amount set to 0.00 + a note),
   and the original is kept in the backend's `removed-transactions.db`, but there's no way to put it
   back yet. Importing the same statement again does **not** restore it (the zeroed transaction
@@ -43,17 +21,14 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 - **PDF sharing on iOS.** `AndroidManifest.xml` has the PDF intent filters, but
   `ios/Runner/Info.plist` has no `CFBundleDocumentTypes` or share extension: on iOS only the file
   picker works.
-- **Configurable parsers**, so other banks can be supported without writing a new `.ts` file
-  (today "add a bank" = a new parser + one line in `index.ts`). Revisit together with the Dart port.
+- **Configurable parsers**, so other banks can be supported without writing code (today "add a
+  bank" = a new Dart parser in `mobile_app/packages/statement_parser` + registering it).
+- **Edit and remove transactions in the app** (not only imports). Needs the soft-delete rule below
+  and better auth first.
+- **Offline queue for quick add.** The `clientId` design already makes a retry safe.
 
 ## 2. Backend as the Actual gateway
 
-- **Performance: one request at a time.** Actual's library keeps only one budget open, so the
-  backend handles requests strictly in a queue, and each request syncs with Actual before
-  answering. An app making many small reads (lists, balances, scrolling transactions) will feel
-  slow.
-  - Larger endpoints, one per screen, instead of many small ones.
-  - Sync at most every few seconds instead of on every request.
 - **Security.** Today it's a single shared token (`X-Import-Token`) over plain HTTP: acceptable
   for importing statements on the LAN, not for an app that edits and removes transactions.
   - Real login, or at least per-device tokens that can be revoked.
@@ -88,30 +63,41 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
     run), plus a `CORS_ORIGINS` setting in `.env` for anything else. Don't use `*`: with
     `IMPORT_TOKEN` empty, any website open in the browser could read the budget through the
     backend.
-- **Logging in the backend and the app.** Problems are hard to diagnose today: the app has no
-  logging at all (handled errors such as "Could not reach the importer" only appear on screen and
-  are never recorded), and the backend only logs startup, rejected uploads and errors.
-  - **Backend:** one line per request (method, path, status, duration), to answer "does the
-    request even reach the backend?". Never log the `X-Import-Token`, passwords, PDF contents or
-    transactions (they're personal banking data).
-  - **App — network requests:** a Dio interceptor that, in debug builds, logs every request to the
-    backend (method, URL, status, duration, and the error type when it fails). Same care: no
-    token, no PDF.
-  - **App — uncaught errors:** `FlutterError.onError` + `PlatformDispatcher.instance.onError` to
-    record every crash with its stack trace in one place.
-  - **App — log file (optional):** keep recent logs in a small file on the device, with a "Copy
-    logs" button in settings or the dev screen. It's the only way to see what happens in a build
-    installed on the phone, with no terminal attached (needs `path_provider`).
 - **CI.** There is none: run `npm test` and `flutter analyze && flutter test` on every push.
-- **Tests with real statements.** The fixtures are synthetic; nothing in `npm test` catches a bank
-  changing its layout (see "Known gaps" in `HowtoTest.md`).
+- **Tests with real statements.** The fixtures are synthetic. The Dart package's
+  `real_statements_test.dart` checks real statements, but only on a machine that has the gitignored
+  `backend_app/Docs/tests/`, so a bank changing its layout isn't caught anywhere else.
+- **Encrypted-PDF test fails on Node 26.** `pdf-password.test.ts` gets "bad XRef entry" from the
+  old pdf.js inside `pdf-parse` (Node 26.13); it passed on older Node. Upgrade or replace
+  `pdf-parse`, which the backend still needs to open password-protected statements for the AI.
 
-## 5. Small items
+## 5. Left over from the plans (`docs/plans/`)
+
+- **Settings redesign, phase 4:** check it on the phone (no backend, connected, backend down; light
+  and dark; the row press and the budget sheet with "Slow motion" on the dev page), then the
+  critique score. Small follow-ups: a count on "Category memory", and the schedule ("Daily at
+  03:00 · last today") on the Backups row.
+- **Backups:**
+  - Back up budgets other than the selected one without switching to each first (a budget picker
+    in Settings → Backups).
+  - Check on the phone: back up now, share a backup, restore app data, the encrypted-budget
+    password prompt.
+- **Logging:** on the phone, follow a failed import from the app's log to the backend's through
+  its request id.
+- **Categories on the phone:**
+  - Reorder categories (the `sort` column exists; the screen has no drag handles).
+  - The backend running `learn-from-actual` by itself when a budget's memory is empty (it needs an
+    account and dates; the button is there).
+  - A progress sheet for "Sync with the backend" (it runs in the background and only logs counts).
+- **`importedId` on Flutter web:** check the 32-bit hash when compiled to JS (`toSigned(32)`).
+  Android and desktop are covered by the tests.
+- **Budget tab:** tell tracking and envelope budgets apart (both render from the same
+  `getBudgetMonth` fields today).
+
+## 6. Small items
 
 - `ANTHROPIC_MODEL` and `GEMINI_MODEL` in `.env.example` default to old models
   (`claude-3-5-haiku-latest`, `gemini-1.5-flash`): update to current ones.
-- `DropdownButtonFormField(value:)` is deprecated (`import_screen.dart`,
-  `category_memory_screen.dart`): switch to `initialValue`.
 
 ---
 
@@ -124,3 +110,15 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 - Dockerfile + `docker-compose.yml` (see `INSTALL.md`).
 - `@actual-app/api` upgraded to 26.10 (requires Node 22+).
 - Removing an import (soft delete) and forgetting category-memory mappings.
+- Core of the app: quick add, balances and recent transactions, this month's budget, one endpoint
+  per screen and sync throttling (`docs/plans/core-app.md`).
+- Optional Actual connection, set from the app's Settings; the backend starts without one.
+- Logging in the backend and the app, with a log viewer and share (`docs/plans/logging.md`).
+- Statements read on the phone: the parsers ported to Dart (`statement_parser`, shared fixtures and
+  golden ids), PDFs opened on the device with `pdfrx` (passwords too), categories and category
+  memory on the phone, matched to Actual and synced with the backend (`docs/plans/dart-parser.md`).
+- Backend reads statements only with AI: regex parsers, `PARSER_MODE` and `POST /import` removed.
+- Scheduled backups of the budget and the app data, plus export/import on the phone
+  (`docs/plans/backups.md`).
+- Settings redesigned as a grouped overview with Backend and Actual screens and a budget sheet
+  (`docs/plans/settings-polish.md`).
