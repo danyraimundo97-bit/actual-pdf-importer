@@ -110,22 +110,35 @@ Everything persistent lives in one named volume, `actual-pdf-importer_importer-d
 | --- | --- |
 | `/data/categories.db` | **The payee → category memory. This is user data.** Lose it and you re-teach every mapping. |
 | `/data/actual-cache/` | Actual's downloaded budget cache. Rebuildable — it just re-downloads. |
+| `/data/removed-transactions.db` | The log of imports you removed (original amounts and notes). |
+| `/data/backups/` | Scheduled backups: `app-data/` (categories and memory) and one folder per budget. |
+| `/data/backup-settings.json` | The backup schedule, and budget passwords you let the backend keep (mode 0600). |
 
 Uploaded PDFs are **never written to disk**, in the container or anywhere else — they're held in
 memory only and discarded after parsing. That's a deliberate invariant of the code, so there is no
 statement data to back up or shred.
 
-Back up the category memory:
+### Backups
+
+Turn them on in the app: **Settings → Backups** (daily, weekly, monthly or yearly, at a time on the
+backend's clock, keeping the newest N). Each run backs up:
+
+- **the app data**: the app's categories and the category memory (`.json.gz`). Restore one from the
+  app (Backups → a backup → Restore); the backend keeps a copy of the current data first, and every
+  phone gets the restored data on its next sync.
+- **your budget**, when Actual is connected and you switched it on: the same `.zip` Actual's own
+  Export makes. To restore it, share it to a computer and, in Actual, choose **Import file → Actual**
+  in the budget list. Actual adds it as a *new* budget, so nothing is overwritten.
+
+Backups live in the same volume as everything else, on the same disk as the backend. They don't
+protect against losing that disk: now and then, share one from the app to somewhere else (Drive,
+another computer). A backup holds the whole budget, so the backend serves backups only with the
+access token, and refuses to when `IMPORT_TOKEN` is unset.
+
+To copy everything by hand instead:
 
 ```bash
-docker compose cp importer:/data/categories.db ./categories-backup.db
-```
-
-Restore it into a fresh deployment:
-
-```bash
-docker compose cp ./categories-backup.db importer:/data/categories.db
-docker compose restart
+docker compose cp importer:/data ./importer-data-backup
 ```
 
 If you'd rather have the data in a directory you can see, replace `- importer-data:/data` with

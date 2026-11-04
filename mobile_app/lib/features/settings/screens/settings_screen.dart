@@ -190,6 +190,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ),
           const SizedBox(height: Space.xxl + Space.sm),
+          const _SectionTitle('Backups'),
+          Text(
+            config.backendUrl?.isNotEmpty == true
+                ? 'Scheduled backups of your budget and the app data, made by the backend.'
+                : 'Export the categories and category memory to a file, or import one.',
+            style: muted,
+          ),
+          const SizedBox(height: Space.lg),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () => context.push('/settings/backups'),
+              icon: const Icon(Icons.backup_outlined, size: 18),
+              label: const Text('Backups'),
+            ),
+          ),
+          const SizedBox(height: Space.xxl + Space.sm),
           const _SectionTitle('Privacy'),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

@@ -56,6 +56,7 @@ export type ActualPort = Pick<
   | 'updateTransaction'
   | 'getBudgetMonth'
   | 'getBudgetMonths'
+  | 'exportBudget'
 >;
 
 /**

@@ -70,9 +70,23 @@ export function recordRemovals(rows: RemovedTransaction[]): void {
 }
 
 export function listRemovals(budgetSyncId: string): RemovedTransaction[] {
-  const rows = getDb()
-    .prepare('SELECT * FROM removed_transactions WHERE budget_sync_id = ? ORDER BY removed_at DESC')
-    .all(budgetSyncId) as Array<Record<string, string | number | null>>;
+  return toRemovals(
+    getDb()
+      .prepare('SELECT * FROM removed_transactions WHERE budget_sync_id = ? ORDER BY removed_at DESC')
+      .all(budgetSyncId) as Array<Record<string, string | number | null>>,
+  );
+}
+
+/** Every budget's removals, for app-data backups. Restoring one goes through recordRemovals (added to, never replaced). */
+export function listAllRemovals(): RemovedTransaction[] {
+  return toRemovals(
+    getDb().prepare('SELECT * FROM removed_transactions ORDER BY removed_at').all() as Array<
+      Record<string, string | number | null>
+    >,
+  );
+}
+
+function toRemovals(rows: Array<Record<string, string | number | null>>): RemovedTransaction[] {
   return rows.map((r) => ({
     transactionId: r.transaction_id as string,
     budgetSyncId: r.budget_sync_id as string,

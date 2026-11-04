@@ -5,6 +5,7 @@ import '../../api/importer_api.dart';
 import '../../category_suggestions.dart';
 import '../../models/actual_category.dart';
 import '../settings_store.dart';
+import 'app_category_rows.dart';
 import 'app_database.dart';
 
 typedef CategorySyncResult = ({int sent, int received});
@@ -62,54 +63,7 @@ class CategorySync {
 
   // --- Out --------------------------------------------------------------
 
-  Future<List<Map<String, Object?>>> _appChanges(int watermark) async {
-    final groups = await (_db.select(
-      _db.categoryGroups,
-    )..where((g) => g.updatedAt.isBiggerThanValue(watermark) & g.source.isNotValue('actual'))).get();
-    final categories = await (_db.select(
-      _db.categories,
-    )..where((c) => c.updatedAt.isBiggerThanValue(watermark) & c.source.isNotValue('actual'))).get();
-    final links = await (_db.select(
-      _db.categoryLinks,
-    )..where((l) => l.updatedAt.isBiggerThanValue(watermark) & l.categoryId.like('actual:%').not())).get();
-    return [
-      for (final g in groups)
-        {
-          'kind': 'group',
-          'id': g.id,
-          'updatedAt': g.updatedAt,
-          'data': {
-            'name': g.name,
-            'sort': g.sort,
-            'isIncome': g.isIncome,
-            'source': g.source,
-            'presetKey': g.presetKey,
-            'hidden': g.hidden,
-          },
-        },
-      for (final c in categories)
-        {
-          'kind': 'category',
-          'id': c.id,
-          'updatedAt': c.updatedAt,
-          'data': {
-            'groupId': c.groupId,
-            'name': c.name,
-            'sort': c.sort,
-            'source': c.source,
-            'presetKey': c.presetKey,
-            'hidden': c.hidden,
-          },
-        },
-      for (final l in links)
-        {
-          'kind': 'link',
-          'id': '${l.categoryId}|${l.budgetSyncId}',
-          'updatedAt': l.updatedAt,
-          'data': {'categoryId': l.categoryId, 'budgetSyncId': l.budgetSyncId, 'actualCategoryId': l.actualCategoryId},
-        },
-    ];
-  }
+  Future<List<Map<String, Object?>>> _appChanges(int watermark) => appCategoryRows(_db, watermark: watermark);
 
   /// The budget's mappings and the unscoped ones (learned before a budget
   /// was chosen), changed since [watermark] or whose link is newer, as
@@ -145,86 +99,7 @@ class CategorySync {
 
   // --- In ---------------------------------------------------------------
 
-  /// Groups first, then categories, then links (each needs the one before).
-  Future<int> _applyAppCategories(List<Map<String, dynamic>> rows) async {
-    const order = {'group': 0, 'category': 1, 'link': 2};
-    final sorted = [...rows]..sort((a, b) => (order[a['kind']] ?? 9).compareTo(order[b['kind']] ?? 9));
-    var applied = 0;
-    await _db.transaction(() async {
-      for (final row in sorted) {
-        if (await _applyAppCategory(row)) applied++;
-      }
-    });
-    return applied;
-  }
-
-  Future<bool> _applyAppCategory(Map<String, dynamic> row) async {
-    final id = row['id'] as String;
-    final updatedAt = row['updatedAt'] as int;
-    final data = (row['data'] as Map).cast<String, dynamic>();
-    switch (row['kind']) {
-      case 'group':
-        final current = await (_db.select(_db.categoryGroups)..where((g) => g.id.equals(id))).getSingleOrNull();
-        if (current != null && current.updatedAt >= updatedAt) return false;
-        await _db
-            .into(_db.categoryGroups)
-            .insertOnConflictUpdate(
-              CategoryGroupsCompanion.insert(
-                id: id,
-                name: data['name'] as String,
-                sort: data['sort'] as int,
-                isIncome: Value(data['isIncome'] as bool? ?? false),
-                source: data['source'] as String,
-                presetKey: Value(data['presetKey'] as String?),
-                hidden: Value(data['hidden'] as bool? ?? false),
-                updatedAt: updatedAt,
-              ),
-            );
-        return true;
-      case 'category':
-        final groupId = data['groupId'] as String;
-        final group = await (_db.select(_db.categoryGroups)..where((g) => g.id.equals(groupId))).getSingleOrNull();
-        if (group == null) return false;
-        final current = await (_db.select(_db.categories)..where((c) => c.id.equals(id))).getSingleOrNull();
-        if (current != null && current.updatedAt >= updatedAt) return false;
-        await _db
-            .into(_db.categories)
-            .insertOnConflictUpdate(
-              CategoriesCompanion.insert(
-                id: id,
-                groupId: groupId,
-                name: data['name'] as String,
-                sort: data['sort'] as int,
-                source: data['source'] as String,
-                presetKey: Value(data['presetKey'] as String?),
-                hidden: Value(data['hidden'] as bool? ?? false),
-                updatedAt: updatedAt,
-              ),
-            );
-        return true;
-      case 'link':
-        final categoryId = data['categoryId'] as String;
-        final budget = data['budgetSyncId'] as String;
-        final category = await (_db.select(_db.categories)..where((c) => c.id.equals(categoryId))).getSingleOrNull();
-        if (category == null) return false;
-        final current = await (_db.select(
-          _db.categoryLinks,
-        )..where((l) => l.categoryId.equals(categoryId) & l.budgetSyncId.equals(budget))).getSingleOrNull();
-        if (current != null && current.updatedAt >= updatedAt) return false;
-        await _db
-            .into(_db.categoryLinks)
-            .insertOnConflictUpdate(
-              CategoryLinksCompanion.insert(
-                categoryId: categoryId,
-                budgetSyncId: budget,
-                actualCategoryId: data['actualCategoryId'] as String,
-                updatedAt: Value(updatedAt),
-              ),
-            );
-        return true;
-    }
-    return false;
-  }
+  Future<int> _applyAppCategories(List<Map<String, dynamic>> rows) => applyAppCategoryRows(_db, rows);
 
   Future<int> _applyMappings(String budget, List<Map<String, dynamic>> rows, _ActualCategories actual) async {
     if (rows.isEmpty) return 0;

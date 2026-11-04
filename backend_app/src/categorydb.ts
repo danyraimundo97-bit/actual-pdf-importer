@@ -385,6 +385,117 @@ export function syncCategories(input: {
   return { ...run(), now };
 }
 
+// --- App-data backups (src/backup.ts) ---------------------------------------
+
+/** One live mapping as an app-data backup holds it. `updatedAt` is epoch ms. */
+export interface BackupMapping {
+  budgetSyncId: string;
+  payee: string;
+  categoryId: string;
+  categoryName?: string;
+  updatedAt: number;
+}
+
+/** Everything an app-data backup takes from this DB, read in one transaction. */
+export function exportCategoryData(): { appCategories: AppCategoryChange[]; mappings: BackupMapping[] } {
+  const database = getDb();
+  return database.transaction(() => {
+    const appCategories = (
+      database.prepare('SELECT kind, id, data, updated_at FROM app_categories ORDER BY kind, id').all() as Array<{
+        kind: string;
+        id: string;
+        data: string;
+        updated_at: number;
+      }>
+    ).map((r) => ({ kind: r.kind, id: r.id, data: JSON.parse(r.data) as unknown, updatedAt: r.updated_at }));
+    const mappings = (
+      database
+        .prepare(
+          `SELECT budget_sync_id, payee_label, category_id, category_name, updated_at
+           FROM payee_categories WHERE deleted = 0 ORDER BY budget_sync_id, payee_key`,
+        )
+        .all() as Array<{
+        budget_sync_id: string;
+        payee_label: string;
+        category_id: string;
+        category_name: string | null;
+        updated_at: string;
+      }>
+    ).map((r) => ({
+      budgetSyncId: r.budget_sync_id,
+      payee: r.payee_label,
+      categoryId: r.category_id,
+      categoryName: r.category_name ?? undefined,
+      updatedAt: Date.parse(r.updated_at),
+    }));
+    return { appCategories, mappings };
+  })();
+}
+
+/**
+ * Puts an app-data backup back, written as new edits at `now` so the normal
+ * sync carries it to every phone (newest wins): each row of the backup is
+ * rewritten with `updated_at` = now, and each live mapping the backup
+ * doesn't have becomes a tombstone at now. App categories missing from the
+ * backup stay (the app hides categories, it never deletes them).
+ */
+export function restoreCategoryData(
+  data: { appCategories: AppCategoryChange[]; mappings: BackupMapping[] },
+  now = Date.now(),
+): { appCategories: number; mappings: number; forgotten: number } {
+  const database = getDb();
+  const iso = new Date(now).toISOString();
+  // The sync cursor is always the server clock, whatever `now` the edits carry.
+  const syncedAt = Date.now();
+  return database.transaction(() => {
+    const writeApp = database.prepare(
+      `INSERT INTO app_categories (kind, id, data, updated_at, synced_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(kind, id) DO UPDATE SET
+         data = excluded.data, updated_at = excluded.updated_at, synced_at = excluded.synced_at`,
+    );
+    for (const c of data.appCategories) writeApp.run(c.kind, c.id, JSON.stringify(c.data), now, syncedAt);
+
+    const keep = new Set<string>();
+    const writeMapping = database.prepare(
+      `INSERT INTO payee_categories
+         (budget_sync_id, payee_key, payee_label, category_id, category_name, updated_at, deleted, synced_at)
+       VALUES (@scope, @key, @label, @categoryId, @categoryName, @updatedAt, 0, @now)
+       ON CONFLICT(budget_sync_id, payee_key) DO UPDATE SET
+         payee_label = excluded.payee_label, category_id = excluded.category_id,
+         category_name = excluded.category_name, updated_at = excluded.updated_at,
+         deleted = 0, synced_at = excluded.synced_at`,
+    );
+    for (const m of data.mappings) {
+      const scope = normalizeBudget(m.budgetSyncId);
+      const key = normalizeKey(m.payee);
+      keep.add(`${scope}|${key}`);
+      writeMapping.run({
+        scope,
+        key,
+        label: m.payee.trim(),
+        categoryId: m.categoryId,
+        categoryName: m.categoryName ?? null,
+        updatedAt: iso,
+        now: syncedAt,
+      });
+    }
+
+    const live = database
+      .prepare('SELECT budget_sync_id, payee_key FROM payee_categories WHERE deleted = 0')
+      .all() as Array<{ budget_sync_id: string; payee_key: string }>;
+    const forget = database.prepare(
+      'UPDATE payee_categories SET deleted = 1, updated_at = ?, synced_at = ? WHERE budget_sync_id = ? AND payee_key = ?',
+    );
+    let forgotten = 0;
+    for (const r of live) {
+      if (keep.has(`${r.budget_sync_id}|${r.payee_key}`)) continue;
+      forget.run(iso, syncedAt, r.budget_sync_id, r.payee_key);
+      forgotten++;
+    }
+    return { appCategories: data.appCategories.length, mappings: data.mappings.length, forgotten };
+  })();
+}
+
 /** True when the budget's scope holds no live mapping (repopulate: rebuild from Actual). */
 export function hasNoMappings(budgetSyncId: string): boolean {
   return !getDb()

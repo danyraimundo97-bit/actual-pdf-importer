@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../data/providers.dart';
 import 'log/error_hooks.dart';
 import '../features/accounts/screens/account_screen.dart';
+import '../features/backups/screens/backups_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
 import '../features/categories/screens/categories_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
@@ -112,6 +113,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'category-list',
                     parentNavigatorKey: _rootNavigatorKey,
                     builder: (context, state) => const CategoriesScreen(),
+                  ),
+                  GoRoute(
+                    path: 'backups',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const BackupsScreen(),
                   ),
                   GoRoute(
                     path: 'diagnostics',

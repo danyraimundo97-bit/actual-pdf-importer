@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/api_client.dart';
+import 'api/backups_api.dart';
 import 'api/categories_api.dart';
 import 'api/importer_api.dart';
 import 'local/db/app_database.dart';
@@ -150,6 +151,10 @@ final localStatementReaderProvider = Provider<LocalStatementReader>((ref) {
 
 final categoriesApiProvider = Provider<CategoriesApi>((ref) {
   return CategoriesApi(ref.watch(apiClientProvider));
+});
+
+final backupsApiProvider = Provider<BackupsApi>((ref) {
+  return BackupsApi(ref.watch(apiClientProvider));
 });
 
 /// GET /config, refetched whenever the backend changes. Used for the

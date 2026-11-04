@@ -25,6 +25,10 @@ services:
       # "Share logs" through GET /logs. Also on the volume, so they survive
       # a container rebuild.
       LOG_DIR: /data/logs
+      # Scheduled backups (Settings → Backups in the app). Defaults to a
+      # "backups" folder next to CATEGORY_DB_PATH, i.e. in the same volume:
+      # share one off the machine now and then (INSTALL.md, "Backups").
+      BACKUP_DIR: /data/backups
 
     volumes:
       - importer-data:/data

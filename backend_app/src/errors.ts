@@ -29,6 +29,11 @@ export type ErrorCode =
   | 'TOO_MANY_FILES'
   | 'FILE_TOO_LARGE'
   | 'BATCH_TOO_LARGE'
+  | 'BACKUP_NOT_FOUND'
+  | 'BACKUP_INVALID'
+  | 'BACKUP_TOO_NEW'
+  | 'BACKUP_FAILED'
+  | 'BUDGET_PASSWORD_REQUIRED'
   | 'INTERNAL_ERROR';
 
 export class ImporterError extends Error {
@@ -236,5 +241,45 @@ export class InvalidFieldError extends ImporterError {
 export class AccountNotFoundError extends ImporterError {
   constructor(accountId: string) {
     super('ACCOUNT_NOT_FOUND', `No account "${accountId}" in this budget.`, 404);
+  }
+}
+
+// --- Backups (src/backup.ts) -------------------------------------------------
+
+export class BackupNotFoundError extends ImporterError {
+  constructor() {
+    super('BACKUP_NOT_FOUND', 'No such backup.', 404);
+  }
+}
+
+/** The file isn't an app-data backup this backend made (or it's damaged). */
+export class BackupInvalidError extends ImporterError {
+  constructor() {
+    super('BACKUP_INVALID', "This file isn't an app-data backup, or it's damaged.", 422);
+  }
+}
+
+/** Made by a newer backend, whose format this one can't read safely. */
+export class BackupTooNewError extends ImporterError {
+  constructor() {
+    super('BACKUP_TOO_NEW', 'This backup was made by a newer version of the backend. Update the backend first.', 409);
+  }
+}
+
+/** A backup ran and failed; the reason is in the backend's log. */
+export class BackupFailedError extends ImporterError {
+  constructor(what: string) {
+    super('BACKUP_FAILED', `The ${what} backup failed. The backend's log has the details.`, 502);
+  }
+}
+
+/** An end-to-end encrypted budget can only be backed up with its password. */
+export class BudgetPasswordRequiredError extends ImporterError {
+  constructor() {
+    super(
+      'BUDGET_PASSWORD_REQUIRED',
+      'This budget is end-to-end encrypted. Let the backend keep its password for backups, in Settings → Backups.',
+      409,
+    );
   }
 }

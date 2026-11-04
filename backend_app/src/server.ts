@@ -48,6 +48,24 @@ import {
   type AppCategoryChange,
   type MappingChange,
 } from './categorydb';
+import {
+  APP_DATA_FOLDER,
+  defaultBackupDir,
+  deleteBackup,
+  findBackup,
+  listBackupFolders,
+  listBackups,
+  restoreAppData,
+} from './backup';
+import {
+  createBackupScheduler,
+  defaultBackupFiles,
+  DEFAULT_SETTINGS,
+  jsonFileStore,
+  parseSettings,
+  publicSettings,
+  type BackupState,
+} from './backup-schedule';
 
 const log = logger.child({ area: 'app' });
 
@@ -671,6 +689,121 @@ app.post('/categories/learn-from-actual', async (req: Request, res: Response) =>
   }
 });
 
+// --- Backups (src/backup.ts, src/backup-schedule.ts) ---------------------
+//
+// Backups hold the whole budget, so everything past reading the list needs
+// IMPORT_TOKEN to be set: with auth disabled, anyone on the network could
+// otherwise download them.
+
+const BACKUP_DIR = defaultBackupDir();
+const backupFiles = defaultBackupFiles();
+const backupScheduler = createBackupScheduler({
+  dir: BACKUP_DIR,
+  session: budgetSession,
+  settingsStore: jsonFileStore(backupFiles.settings, DEFAULT_SETTINGS),
+  stateStore: jsonFileStore<BackupState>(backupFiles.state, {}),
+});
+
+function backupStatus() {
+  const settings = backupScheduler.settings();
+  const state = backupScheduler.state();
+  const describe = (folder: string, name?: string) => {
+    const next = backupScheduler.nextDue(folder);
+    return {
+      folder,
+      ...(name ? { name } : {}),
+      backups: listBackups(BACKUP_DIR, folder),
+      last: state[folder] ?? null,
+      nextDue: next ? next.toISOString() : null,
+    };
+  };
+  // Chosen budgets first, then folders of budgets no longer chosen (their backups stay listed).
+  const budgetFolders = [
+    ...settings.budgets.map((b) => ({ folder: b.syncId, name: b.name })),
+    ...listBackupFolders(BACKUP_DIR)
+      .filter((f) => f !== APP_DATA_FOLDER && !settings.budgets.some((b) => b.syncId === f))
+      .map((folder) => ({ folder, name: undefined })),
+  ];
+  return {
+    settings: publicSettings(settings),
+    actualConfigured: budgetSession.isConfigured(),
+    appData: describe(APP_DATA_FOLDER),
+    budgets: budgetFolders.map((b) => describe(b.folder, b.name)),
+  };
+}
+
+app.get('/backups', (_req: Request, res: Response) => {
+  try {
+    res.json(backupStatus());
+  } catch (err) {
+    sendImporterError(res, err, 'Could not list the backups.');
+  }
+});
+
+app.get('/backups/settings', (_req: Request, res: Response) => {
+  res.json(publicSettings(backupScheduler.settings()));
+});
+
+app.put('/backups/settings', (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    const next = parseSettings(req.body, backupScheduler.settings());
+    backupScheduler.updateSettings(next);
+    res.json(publicSettings(next));
+  } catch (err) {
+    sendImporterError(res, err, 'Could not save the backup settings.');
+  }
+});
+
+/** Back up now. Body: { kind?: "app-data" | "budget", budgetSyncId? }; nothing = everything. */
+app.post('/backups', async (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    const kind = req.body?.kind;
+    if (kind !== undefined && kind !== 'app-data' && kind !== 'budget') {
+      throw new InvalidFieldError('kind', '"app-data" or "budget"');
+    }
+    const budgetSyncId = typeof req.body?.budgetSyncId === 'string' ? req.body.budgetSyncId.trim() : undefined;
+    const results = await backupScheduler.runNow({ kind, budgetSyncId: budgetSyncId || undefined });
+    res.json({ results, status: backupStatus() });
+  } catch (err) {
+    sendImporterError(res, err, 'Could not run the backup.');
+  }
+});
+
+app.get('/backups/:folder/:file', (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    const { entry, path: file } = findBackup(BACKUP_DIR, req.params.folder, req.params.file);
+    requestLog(res).info({ folder: entry.folder, file: entry.file }, 'Backup downloaded');
+    res.download(file, entry.file);
+  } catch (err) {
+    sendImporterError(res, err, 'Could not read the backup.');
+  }
+});
+
+app.delete('/backups/:folder/:file', (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    deleteBackup(BACKUP_DIR, req.params.folder, req.params.file);
+    requestLog(res).info({ folder: req.params.folder, file: req.params.file }, 'Backup deleted');
+    res.status(204).end();
+  } catch (err) {
+    sendImporterError(res, err, 'Could not delete the backup.');
+  }
+});
+
+/** Restores an app-data backup: safety copy first, then written as new edits so phones sync it. */
+app.post('/backups/app-data/:file/restore', (req: Request, res: Response) => {
+  try {
+    if (!IMPORT_TOKEN) throw new AuthRequiredError();
+    const result = restoreAppData(BACKUP_DIR, req.params.file);
+    res.json(result);
+  } catch (err) {
+    sendImporterError(res, err, 'Could not restore the backup.');
+  }
+});
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 /**
@@ -723,6 +856,7 @@ process.on('uncaughtException', (err) => {
 const PORT = process.env.PORT ?? 3000;
 const server = app.listen(PORT, () => {
   log.info({ port: Number(PORT), debugLogging: debugFromEnv() }, `PDF importer backend listening on port ${PORT}`);
+  backupScheduler.start();
 });
 void initLogFile().then((dir) => {
   if (dir) log.info({ dir }, 'Writing log files');
@@ -741,6 +875,7 @@ async function shutdownGracefully(signal: string) {
   if (shuttingDown) process.exit(1);
   shuttingDown = true;
   log.info({ signal }, 'Shutting down — closing the Actual connection');
+  backupScheduler.stop();
   try {
     await budgetSession.shutdown();
   } catch (err) {
