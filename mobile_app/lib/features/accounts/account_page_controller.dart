@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/log/app_log.dart';
 import '../../data/models/account_page.dart';
 import '../../data/providers.dart';
+
+const _log = AppLog('accounts');
 
 /// One account's transactions, loaded a page at a time as the list scrolls.
 class AccountPageState {
@@ -14,6 +17,10 @@ class AccountPageState {
   final bool loadingMore;
   final Object? error;
 
+  /// Read from the phone's own ledger (Actual not connected): rows can be
+  /// edited and removed here.
+  final bool onPhone;
+
   const AccountPageState({
     this.name,
     this.balanceCents,
@@ -22,6 +29,7 @@ class AccountPageState {
     this.loading = true,
     this.loadingMore = false,
     this.error,
+    this.onPhone = false,
   });
 
   bool get hasMore => nextCursor != null;
@@ -32,28 +40,49 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
 
   @override
   AccountPageState build(String accountId) {
+    // The phone's rows change under the screen (an edit here, a statement
+    // saved): reload from the top.
+    ref.listen(ledgerChangesProvider, (_, _) {
+      if (state.onPhone) refresh();
+    });
     Future.microtask(refresh);
     return const AccountPageState();
   }
 
   String? get _budgetSyncId => ref.read(appConfigProvider).budgetSyncId;
 
+  Future<AccountPage> _page(bool onPhone, {String? before}) {
+    if (onPhone) return ref.read(ledgerReportsProvider).accountPage(arg, before: before, limit: pageSize);
+    return ref
+        .read(importerApiProvider)
+        .getAccountPage(arg, budgetSyncId: _budgetSyncId, before: before, limit: pageSize);
+  }
+
   /// Reloads from the newest transaction.
   Future<void> refresh() async {
-    state = AccountPageState(name: state.name, balanceCents: state.balanceCents, rows: state.rows, loading: true);
+    state = AccountPageState(
+      name: state.name,
+      balanceCents: state.balanceCents,
+      rows: state.rows,
+      loading: true,
+      onPhone: state.onPhone,
+    );
     try {
-      final page = await ref
-          .read(importerApiProvider)
-          .getAccountPage(arg, budgetSyncId: _budgetSyncId, limit: pageSize);
+      final onPhone = await ref.read(readsLedgerProvider.future);
+      final page = await _page(onPhone);
       state = AccountPageState(
         name: page.accountName,
         balanceCents: page.balanceCents,
         rows: page.transactions,
         nextCursor: page.nextCursor,
         loading: false,
+        onPhone: onPhone,
       );
     } on ApiException catch (e) {
       state = AccountPageState(name: state.name, rows: state.rows, loading: false, error: e);
+    } catch (e, stack) {
+      _log.error('Account could not be read', e, stack, {'account': arg});
+      state = AccountPageState(name: state.name, rows: state.rows, loading: false, error: e, onPhone: state.onPhone);
     }
   }
 
@@ -61,6 +90,7 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
   Future<void> loadMore() async {
     final cursor = state.nextCursor;
     if (cursor == null || state.loadingMore || state.loading) return;
+    final onPhone = state.onPhone;
     state = AccountPageState(
       name: state.name,
       balanceCents: state.balanceCents,
@@ -68,17 +98,17 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
       nextCursor: cursor,
       loading: false,
       loadingMore: true,
+      onPhone: onPhone,
     );
     try {
-      final page = await ref
-          .read(importerApiProvider)
-          .getAccountPage(arg, budgetSyncId: _budgetSyncId, before: cursor, limit: pageSize);
+      final page = await _page(onPhone, before: cursor);
       state = AccountPageState(
         name: page.accountName,
         balanceCents: page.balanceCents,
         rows: [...state.rows, ...page.transactions],
         nextCursor: page.nextCursor,
         loading: false,
+        onPhone: onPhone,
       );
     } on ApiException catch (e) {
       // The cursor is unknown when the list changed meanwhile: start over.
@@ -95,5 +125,6 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
   }
 }
 
-final accountPageProvider =
-    AutoDisposeNotifierProviderFamily<AccountPageController, AccountPageState, String>(AccountPageController.new);
+final accountPageProvider = AutoDisposeNotifierProviderFamily<AccountPageController, AccountPageState, String>(
+  AccountPageController.new,
+);

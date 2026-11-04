@@ -12,6 +12,7 @@ import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
+import '../../../shared/widgets/on_phone_status.dart';
 import '../../../shared/widgets/skeleton.dart';
 
 const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -24,15 +25,16 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboard = ref.watch(dashboardProvider);
-    final budgetName = ref.watch(appConfigProvider).budgetName;
+    // Without Actual, Home reads the phone's own accounts (local ledger).
+    final onPhone = ref.watch(readsLedgerProvider).valueOrNull ?? false;
+    final budgetName = onPhone ? null : ref.watch(appConfigProvider).budgetName;
 
     Future<void> refresh() => ref.refresh(dashboardProvider.future);
 
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: RequiresActual(
-          child: dashboard.when(
+        child: dashboard.when(
             skipLoadingOnRefresh: true,
             loading: () => const _DashboardSkeleton(),
             error: (error, _) {
@@ -50,24 +52,36 @@ class DashboardScreen extends ConsumerWidget {
               );
             },
             data: (data) {
+              if (data.isEmpty && onPhone && data.accounts.isEmpty) {
+                return EmptyState(
+                  icon: Icons.account_balance_outlined,
+                  title: 'Start with your accounts',
+                  message:
+                      'Home shows your balances and where your money goes. Add the accounts you use, '
+                      'then import a statement into them. It all stays on this phone.',
+                  actionLabel: 'Add an account',
+                  actionIcon: Icons.add_rounded,
+                  onAction: () => context.push('/settings/accounts'),
+                );
+              }
               if (data.isEmpty) {
                 return EmptyState(
                   icon: Icons.insights_outlined,
                   title: 'Nothing to show yet',
-                  message:
-                      'This budget has no transactions. Import a statement and the numbers '
-                      'show up here.',
+                  message: onPhone
+                      ? 'Your accounts have no transactions yet. Import a statement and the numbers show up here.'
+                      : 'This budget has no transactions. Import a statement and the numbers '
+                            'show up here.',
                   actionLabel: 'Import a statement',
                   onAction: () => context.go('/import'),
                 );
               }
               return RefreshIndicator(
                 onRefresh: refresh,
-                child: _DashboardBody(data: data, budgetName: budgetName),
+                child: _DashboardBody(data: data, budgetName: budgetName, onPhone: onPhone),
               );
             },
           ),
-        ),
       ),
     );
   }
@@ -77,7 +91,10 @@ class _DashboardBody extends StatelessWidget {
   final Dashboard data;
   final String? budgetName;
 
-  const _DashboardBody({required this.data, required this.budgetName});
+  /// Read from the phone's own ledger, not Actual.
+  final bool onPhone;
+
+  const _DashboardBody({required this.data, required this.budgetName, this.onPhone = false});
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +105,7 @@ class _DashboardBody extends StatelessWidget {
       padding: const EdgeInsets.only(top: Space.xl, bottom: Space.xxl * 3),
       children: [
         _Padded(_Header(data: data, budgetName: budgetName)),
+        if (onPhone) ...[const SizedBox(height: Space.md), const _Padded(OnPhoneStatus())],
         if (data.uncategorizedCount > 0) ...[
           const SizedBox(height: Space.xl),
           _Padded(_AttentionRow(count: data.uncategorizedCount)),

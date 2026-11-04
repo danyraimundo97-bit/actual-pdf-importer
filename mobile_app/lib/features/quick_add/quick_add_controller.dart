@@ -180,7 +180,8 @@ class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
           );
       _log.info('Transaction saved', {'accountId': accountId, 'id': result.id, 'created': result.created});
       await ref.read(settingsStoreProvider).setLastAccountId(accountId);
-      ref.invalidate(dashboardProvider);
+      // Only when shown: invalidating starts the provider otherwise.
+      if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
       ref.invalidate(budgetMonthProvider);
       state = state.copyWith(saving: false);
       return true;

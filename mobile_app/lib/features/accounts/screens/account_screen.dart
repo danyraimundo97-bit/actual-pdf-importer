@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
+import '../../../core/log/app_log.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/account_page.dart';
 import '../../../data/providers.dart';
@@ -12,6 +13,9 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../account_page_controller.dart';
+import '../widgets/ledger_transaction_sheet.dart';
+
+const _log = AppLog('accounts');
 
 /// One account: its balance, then every transaction newest first, grouped
 /// by day, loading more as you scroll. Pull to refresh.
@@ -46,6 +50,49 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     super.dispose();
   }
 
+  /// The phone's own rows: change or remove one. The list reloads by
+  /// itself (the controller watches the ledger).
+  Future<void> _edit(AccountTransaction tx) async {
+    final store = ref.read(ledgerStoreProvider);
+    final row = await store.transaction(tx.id);
+    final groups = await ref
+        .read(localCategoryStoreProvider)
+        .groups(budgetSyncId: ref.read(appConfigProvider).budgetSyncId);
+    if (row == null || !mounted) return;
+    final action = await showLedgerTransactionSheet(
+      context,
+      current: (
+        date: tx.date,
+        amountCents: tx.amountCents,
+        payee: tx.payee ?? '',
+        categoryId: row.categoryId,
+        notes: tx.notes ?? '',
+      ),
+      categoryName: tx.category,
+      categoryGroups: groups,
+    );
+    if (action == null) return;
+    if (action.remove) {
+      await store.deleteTransaction(tx.id);
+      _log.info('Transaction removed', {'transaction': tx.id});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transaction removed.')));
+      }
+      return;
+    }
+    final edit = action.edit!;
+    await store.updateTransaction(
+      tx.id,
+      date: edit.date,
+      amountCents: edit.amountCents,
+      payee: edit.payee,
+      categoryId: edit.categoryId,
+      clearCategory: edit.categoryId == null,
+      notes: edit.notes,
+    );
+    _log.info('Transaction changed', {'transaction': tx.id});
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(accountPageProvider(widget.accountId));
@@ -74,13 +121,15 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           children: [
             _BalanceHeader(balanceCents: state.balanceCents),
             if (state.rows.isEmpty)
-              const EmptyState(
+              EmptyState(
                 icon: Icons.receipt_long_outlined,
                 title: 'No transactions yet',
-                message: 'Transactions added to this account in Actual, imported or added here show up in this list.',
+                message: state.onPhone
+                    ? 'Statements you save into this account show up in this list.'
+                    : 'Transactions added to this account in Actual, imported or added here show up in this list.',
               )
             else
-              ..._rowsWithDayHeaders(context, state.rows),
+              ..._rowsWithDayHeaders(context, state.rows, editable: state.onPhone),
             if (state.loadingMore)
               const Padding(
                 padding: EdgeInsets.all(Space.lg),
@@ -98,7 +147,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     return Scaffold(appBar: AppBar(title: Text(title)), body: body);
   }
 
-  List<Widget> _rowsWithDayHeaders(BuildContext context, List<AccountTransaction> rows) {
+  List<Widget> _rowsWithDayHeaders(BuildContext context, List<AccountTransaction> rows, {required bool editable}) {
     final out = <Widget>[];
     DateTime? day;
     for (final tx in rows) {
@@ -106,7 +155,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         day = tx.date;
         out.add(_DayHeader(date: tx.date));
       }
-      out.add(_TransactionRow(tx: tx));
+      // Transfers and splits are read-only on the phone; the opening balance
+      // is changed in Settings › Accounts.
+      final canEdit = editable && !tx.transfer && tx.splits.isEmpty && !tx.openingBalance;
+      out.add(_TransactionRow(tx: tx, onTap: canEdit ? () => _edit(tx) : null));
     }
     return out;
   }
@@ -168,22 +220,27 @@ class _DayHeader extends StatelessWidget {
 
 class _TransactionRow extends StatelessWidget {
   final AccountTransaction tx;
+  final VoidCallback? onTap;
 
-  const _TransactionRow({required this.tx});
+  const _TransactionRow({required this.tx, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final String detail;
-    if (tx.transfer) {
+    if (tx.openingBalance) {
+      detail = 'Changed in Settings › Accounts';
+    } else if (tx.transfer) {
       detail = 'Transfer';
     } else if (tx.splits.isNotEmpty) {
       detail = 'Split: ${tx.splits.map((s) => s.category ?? 'Uncategorized').toSet().join(', ')}';
     } else {
       detail = tx.category ?? 'Uncategorized';
     }
-    final uncategorized = !tx.transfer && tx.splits.isEmpty && tx.category == null;
-    return Padding(
+    final uncategorized = !tx.openingBalance && !tx.transfer && tx.splits.isEmpty && tx.category == null;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: Space.gutter, vertical: Space.sm + 2),
       child: Row(
         children: [
@@ -192,7 +249,7 @@ class _TransactionRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  tx.payee ?? 'No payee',
+                  tx.payee ?? (tx.openingBalance ? 'Opening balance' : 'No payee'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
@@ -215,6 +272,7 @@ class _TransactionRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

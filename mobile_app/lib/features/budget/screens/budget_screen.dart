@@ -4,11 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/log/app_log.dart';
+import '../../../data/local/ledger_store.dart';
 import '../../../data/models/budget_month.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/error_retry.dart';
+import '../../../shared/widgets/on_phone_status.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../widgets/budget_amount_sheet.dart';
+
+const _log = AppLog('budget');
 
 const _months = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -25,8 +31,10 @@ String shiftMonth(String yyyyMm, int delta) {
   return '${d.year}-${d.month.toString().padLeft(2, '0')}';
 }
 
-/// This month's budget: how much is left in each category. Read-only;
-/// budgeting itself still happens in Actual.
+/// This month's budget: how much is left in each category. With Actual
+/// it's read-only (budgeting happens there); without, it's the phone's own
+/// budget and tapping a category sets its amount
+/// (docs/plans/local-ledger.md, Phase 4).
 class BudgetScreen extends ConsumerStatefulWidget {
   const BudgetScreen({super.key});
 
@@ -38,14 +46,41 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   /// Null = the current month (the backend decides which that is).
   String? _month;
 
+  Future<void> _edit(String month, BudgetCategory category) async {
+    final cents = await showBudgetAmountSheet(
+      context,
+      categoryName: category.name,
+      monthName: monthLabel(month),
+      currentCents: category.budgetedCents,
+    );
+    if (cents == null || cents == category.budgetedCents) return;
+    await ref.read(ledgerStoreProvider).setBudget(phoneScope, category.id, month, cents);
+    _log.info('Budget amount set', {'category': category.id, 'month': month});
+  }
+
+  Future<void> _copyLastMonth(String month) async {
+    final copied = await ref.read(ledgerStoreProvider).copyPreviousMonth(phoneScope, month);
+    _log.info("Last month's budget copied", {'month': month, 'categories': copied});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          copied == 0
+              ? '${monthLabel(shiftMonth(month, -1))} had nothing budgeted.'
+              : 'Copied $copied amount${copied == 1 ? '' : 's'} from ${monthLabel(shiftMonth(month, -1))}.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final budget = ref.watch(budgetMonthProvider(_month));
+    final onPhone = ref.watch(readsLedgerProvider).valueOrNull ?? false;
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: RequiresActual(
-          child: budget.when(
+        child: budget.when(
             skipLoadingOnRefresh: true,
             loading: () => const _BudgetSkeleton(),
             error: (error, _) => isActualNotConnected(error)
@@ -57,10 +92,14 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                   ),
             data: (data) => RefreshIndicator(
               onRefresh: () => ref.refresh(budgetMonthProvider(_month).future),
-              child: _BudgetBody(data: data, onMonth: (m) => setState(() => _month = m)),
+              child: _BudgetBody(
+                data: data,
+                onMonth: (m) => setState(() => _month = m),
+                onEdit: onPhone ? (c) => _edit(data.month, c) : null,
+                onCopyLastMonth: onPhone ? () => _copyLastMonth(data.month) : null,
+              ),
             ),
           ),
-        ),
       ),
     );
   }
@@ -70,7 +109,11 @@ class _BudgetBody extends StatelessWidget {
   final BudgetMonth data;
   final ValueChanged<String> onMonth;
 
-  const _BudgetBody({required this.data, required this.onMonth});
+  /// Set for the phone's own budget: amounts can be changed here.
+  final ValueChanged<BudgetCategory>? onEdit;
+  final VoidCallback? onCopyLastMonth;
+
+  const _BudgetBody({required this.data, required this.onMonth, this.onEdit, this.onCopyLastMonth});
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +149,23 @@ class _BudgetBody extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
           child: _Summary(data: data),
         ),
+        if (onEdit != null) ...[
+          const SizedBox(height: Space.md),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+            child: Row(
+              children: [
+                const Expanded(child: OnPhoneStatus()),
+                if (data.totalBudgetedCents == 0 && data.month.compareTo(data.firstMonth) > 0)
+                  TextButton.icon(
+                    onPressed: onCopyLastMonth,
+                    icon: const Icon(Icons.content_copy_rounded, size: 16),
+                    label: const Text('Copy last month'),
+                  ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: Space.xl),
         if (data.groups.isEmpty)
           Padding(
@@ -115,7 +175,7 @@ class _BudgetBody extends StatelessWidget {
               style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
             ),
           ),
-        for (final group in data.groups) _GroupSection(group: group),
+        for (final group in data.groups) _GroupSection(group: group, onEdit: onEdit),
         if (data.income.isNotEmpty) _IncomeSection(income: data.income),
       ],
     );
@@ -192,8 +252,9 @@ class _Summary extends StatelessWidget {
 
 class _GroupSection extends StatefulWidget {
   final BudgetGroup group;
+  final ValueChanged<BudgetCategory>? onEdit;
 
-  const _GroupSection({required this.group});
+  const _GroupSection({required this.group, this.onEdit});
 
   @override
   State<_GroupSection> createState() => _GroupSectionState();
@@ -238,7 +299,12 @@ class _GroupSectionState extends State<_GroupSection> {
           curve: Curves.easeOutCubic,
           alignment: Alignment.topCenter,
           child: _open
-              ? Column(children: [for (final c in group.categories) _CategoryRow(category: c)])
+              ? Column(
+                  children: [
+                    for (final c in group.categories)
+                      _CategoryRow(category: c, onTap: widget.onEdit == null ? null : () => widget.onEdit!(c)),
+                  ],
+                )
               : const SizedBox(width: double.infinity),
         ),
         const SizedBox(height: Space.sm),
@@ -250,7 +316,10 @@ class _GroupSectionState extends State<_GroupSection> {
 class _CategoryRow extends StatelessWidget {
   final BudgetCategory category;
 
-  const _CategoryRow({required this.category});
+  /// Null when the amounts are Actual's (read-only here).
+  final VoidCallback? onTap;
+
+  const _CategoryRow({required this.category, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -260,8 +329,11 @@ class _CategoryRow extends StatelessWidget {
     return Semantics(
       label: '${category.name}: ${formatCents(category.balanceCents)} left'
           '${over ? ', overspent' : ''}',
+      button: onTap != null,
       excludeSemantics: true,
-      child: Padding(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -301,6 +373,7 @@ class _CategoryRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

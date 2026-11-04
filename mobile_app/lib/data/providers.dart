@@ -11,6 +11,7 @@ import 'local/db/database_opening.dart';
 import 'local/db/local_category_store.dart';
 import 'local/db/open_connection.dart';
 import 'local/import_history_store.dart';
+import 'local/ledger_reports.dart';
 import 'local/ledger_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
@@ -224,16 +225,43 @@ final linkStateProvider = FutureProvider.autoDispose<LinkState>((ref) async {
 /// tab stays alive in the shell, so it listens to this to reload.
 final categoryMemoryRevisionProvider = StateProvider<int>((ref) => 0);
 
-/// GET /dashboard for the active budget. Invalidated after an import so
-/// the numbers reflect what was just added.
-final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) {
+/// True while Home, Budget and the account screen read the phone's own
+/// ledger: whenever Actual isn't connected (docs/plans/local-ledger.md,
+/// Phase 4). With Actual they still ask the backend, until the sync
+/// (Phase 5) keeps a copy of the budget in the ledger.
+final readsLedgerProvider = FutureProvider.autoDispose<bool>((ref) async {
+  return await ref.watch(linkStateProvider.future) != LinkState.ready;
+});
+
+final ledgerReportsProvider = Provider<LedgerReports>((ref) {
+  return LedgerReports(ref.watch(appDatabaseProvider), ref.watch(ledgerStoreProvider));
+});
+
+/// Counts ledger changes, so what's built from the ledger rebuilds live.
+final ledgerChangesProvider = StreamProvider.autoDispose<int>((ref) {
+  var changes = 0;
+  return ref.watch(ledgerStoreProvider).watchChanges().map((_) => ++changes);
+});
+
+/// Home: from the ledger without Actual, else GET /dashboard for the active
+/// budget (invalidated after an import so the numbers reflect it).
+final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) async {
+  if (await ref.watch(readsLedgerProvider.future)) {
+    ref.watch(ledgerChangesProvider);
+    return ref.watch(ledgerReportsProvider).dashboard(phoneScope);
+  }
   final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
   return ref.watch(importerApiProvider).getDashboard(budgetSyncId: budgetSyncId);
 });
 
-/// GET /budget-month for the active budget; `null` = the current month.
-/// Invalidated after a quick add or an import.
-final budgetMonthProvider = FutureProvider.autoDispose.family<BudgetMonth, String?>((ref, month) {
+/// Budget for one month (`null` = the current one): from the ledger without
+/// Actual, else GET /budget-month (invalidated after a quick add or an
+/// import).
+final budgetMonthProvider = FutureProvider.autoDispose.family<BudgetMonth, String?>((ref, month) async {
+  if (await ref.watch(readsLedgerProvider.future)) {
+    ref.watch(ledgerChangesProvider);
+    return ref.watch(ledgerReportsProvider).budgetMonth(phoneScope, month);
+  }
   final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
   return ref.watch(importerApiProvider).getBudgetMonth(budgetSyncId: budgetSyncId, month: month);
 });

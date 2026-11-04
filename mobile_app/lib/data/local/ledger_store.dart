@@ -383,13 +383,63 @@ class LedgerStore {
   }
 
   /// An account's live transactions, newest first.
-  Future<List<LedgerTransaction>> transactions(String accountId, {int? limit}) {
+  Future<List<LedgerTransaction>> transactions(String accountId, {int? limit, int offset = 0}) {
     final query = _db.select(_db.ledgerTransactions)
       ..where((t) => t.accountId.equals(accountId) & t.deleted.equals(false) & t.parentId.isNull())
-      ..orderBy([(t) => OrderingTerm.desc(t.date), (t) => OrderingTerm.desc(t.createdAt)]);
-    if (limit != null) query.limit(limit);
+      ..orderBy([
+        (t) => OrderingTerm.desc(t.date),
+        (t) => OrderingTerm.desc(t.createdAt),
+        (t) => OrderingTerm.desc(t.id),
+      ]);
+    if (limit != null) query.limit(limit, offset: offset);
     return query.get();
   }
+
+  /// Every live transaction of a scope, split children included (the
+  /// builders in ledger_builders.dart read them).
+  Future<List<LedgerTransaction>> allTransactions(String scope) =>
+      (_db.select(_db.ledgerTransactions)..where((t) => t.scope.equals(scope) & t.deleted.equals(false))).get();
+
+  /// A scope's accounts, closed ones included.
+  Future<List<LedgerAccount>> accounts(String scope) =>
+      (_db.select(_db.ledgerAccounts)
+            ..where((a) => a.scope.equals(scope) & a.deleted.equals(false))
+            ..orderBy([(a) => OrderingTerm(expression: a.sort)]))
+          .get();
+
+  /// Payee id → name for a scope.
+  Future<Map<String, String>> payeeNames(String scope) async => {
+    for (final p in await (_db.select(_db.ledgerPayees)..where((p) => p.scope.equals(scope))).get()) p.id: p.name,
+  };
+
+  /// Every budget amount of a scope, all months (envelopes carry over).
+  Future<List<LedgerBudget>> allBudgets(String scope) =>
+      (_db.select(_db.ledgerBudgets)..where((b) => b.scope.equals(scope))).get();
+
+  /// The budget style ('tracking' unless chosen otherwise). For the phone's
+  /// scope it's the user's choice (Phase 7); for an Actual budget, Actual's.
+  Future<String?> budgetMode(String scope) async =>
+      (await (_db.select(_db.ledgerSyncState)..where((s) => s.scope.equals(scope))).getSingleOrNull())?.budgetMode;
+
+  Future<void> setBudgetMode(String scope, String mode) => _db
+      .into(_db.ledgerSyncState)
+      .insert(
+        LedgerSyncStateCompanion.insert(scope: scope, budgetMode: Value(mode)),
+        onConflict: DoUpdate((_) => LedgerSyncStateCompanion(budgetMode: Value(mode))),
+      );
+
+  /// Fires whenever a ledger table changes, for screens that recompute.
+  Stream<void> watchChanges() => _db
+      .tableUpdates(
+        TableUpdateQuery.onAllTables([
+          _db.ledgerAccounts,
+          _db.ledgerPayees,
+          _db.ledgerTransactions,
+          _db.ledgerBudgets,
+          _db.ledgerSyncState,
+        ]),
+      )
+      .map((_) {});
 
   // Budget amounts -----------------------------------------------------------
 

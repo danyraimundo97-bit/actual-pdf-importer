@@ -208,7 +208,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
           ),
         );
     if (phone != null) return;
-    ref.invalidate(dashboardProvider);
+    if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
     // The import remembered each payee's category on the backend.
     ref.read(categoryMemoryRevisionProvider.notifier).state++;
   }
@@ -274,7 +274,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         'skipped': outcome.skipped,
       });
       await ref.read(importHistoryProvider.notifier).markUndone(entry);
-      ref.invalidate(dashboardProvider);
+      if (ref.exists(dashboardProvider)) ref.invalidate(dashboardProvider);
       if (!mounted) return;
       final skipped = outcome.skipped == 0
           ? ''

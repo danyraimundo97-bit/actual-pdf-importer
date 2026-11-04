@@ -46,6 +46,10 @@ class AccountTransaction {
   final bool cleared;
   final List<({int amountCents, String? category})> splits;
 
+  /// The account's opening balance (the phone's ledger marks it; it's
+  /// changed in Settings › Accounts, not here).
+  final bool openingBalance;
+
   const AccountTransaction({
     required this.id,
     required this.date,
@@ -56,6 +60,7 @@ class AccountTransaction {
     this.transfer = false,
     this.cleared = false,
     this.splits = const [],
+    this.openingBalance = false,
   });
 
   factory AccountTransaction.fromJson(Map<String, dynamic> json) => AccountTransaction(

@@ -24,7 +24,9 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 - **Configurable parsers**, so other banks can be supported without writing code (today "add a
   bank" = a new Dart parser in `mobile_app/packages/statement_parser` + registering it).
 - **Edit and remove transactions in the app** (not only imports). Needs the soft-delete rule below
-  and better auth first. Planned in `docs/plans/local-ledger.md` (Phases 4–5).
+  and better auth first. Planned in `docs/plans/local-ledger.md` (Phases 4–5). Done without Actual
+  (Phase 4: the account screen edits and removes the phone's rows); with Actual it comes with the
+  sync.
 - **Offline queue for quick add.** Planned in `docs/plans/local-ledger.md` (Phase 6).
 - **Local ledger** (`docs/plans/local-ledger.md`): the phone keeps accounts, transactions and budget
   amounts in an encrypted database, so Home and Budget work without Actual, and syncs both ways with

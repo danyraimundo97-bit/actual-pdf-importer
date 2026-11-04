@@ -343,6 +343,55 @@ for all three.
 - Tests: builder unit tests mirroring `dashboard.test.ts` and `budget-month.test.ts`; widget tests
   with Home and Budget filled and no backend at all.
 
+### Phase 4 as built (2026-11-04)
+
+- **Only without Actual, as in Phase 3.** `readsLedgerProvider` is true whenever the link state isn't
+  `ready`. Home, Budget and the account screen then read the phone's ledger (scope `''`). With
+  Actual connected they still call `/dashboard`, `/budget-month` and `/accounts/:id/transactions`,
+  because the ledger holds no copy of an Actual budget until Phase 5. Phase 5 switches them over
+  and stops calling those routes.
+- **Pure builders** (`lib/data/local/ledger_builders.dart`), returning the same models as the
+  backend, so the screens didn't change shape:
+  - `buildLedgerDashboard` ports `buildDashboard` rule for rule. Its tests
+    (`ledger_builders_test.dart`) are the backend's `dashboard.test.ts` cases. Removed rows and
+    closed accounts are dropped.
+  - `buildLedgerBudgetMonth` covers both styles (`BudgetStyle.tracking` / `envelope`, named as in
+    Actual), with the rules written in its doc comment:
+    - spent: on-budget flows by category, refunds counting back;
+    - income: income categories only, as in Actual. Uncategorized money in isn't income yet;
+    - envelopes: a positive leftover carries, and an overspent one carries only with `carryover`
+      (otherwise it comes out of next month's To budget);
+    - the month switcher runs from the first month with data to next month.
+  - **Not yet checked against Actual's numbers.** The rules follow Actual's documented behaviour.
+    The comparison with a real budget needs Actual's data in the ledger, so it moves to Phase 5.
+  - Spending in a hidden category, or one the phone doesn't know, isn't shown in the budget. "Hold
+    for next month" isn't modelled.
+- **`LedgerReports`** (`lib/data/local/ledger_reports.dart`) loads the rows and calls the builders.
+  The account page pages by offset, 50 at a time.
+- **Live updates:** `ledgerChangesProvider` fires on any ledger table change (drift
+  `tableUpdates`), and the Home, Budget and account providers watch it.
+- **Budget style:** stored in `LedgerSyncState.budgetMode` for the phone's scope
+  (`LedgerStore.budgetMode`), defaulting to simple limits. Choosing it in the app is Phase 7.
+- **Screens:**
+  - Home: `RequiresActual` is gone. With no accounts it says "Start with your accounts" and offers
+    "Add an account" (Settings › Accounts). With accounts but no transactions it offers "Import a
+    statement". "Add a transaction" waits for offline quick add (Phase 6). A quiet "Kept on this
+    phone" line sits under net worth (`OnPhoneStatus`, which Phase 5 extends with the sync state).
+  - Budget: `RequiresActual` is gone too. Tapping a category sets its amount for the month
+    (`budget_amount_sheet.dart`), and "Copy last month" appears while nothing is budgeted. With
+    Actual it stays read-only.
+  - Account screen: tapping a row edits payee, amount, date, category and notes, or removes it
+    (`ledger_transaction_sheet.dart`, removal is a tombstone). Transfers, splits and the opening
+    balance aren't editable there; the opening balance is changed in Settings › Accounts.
+- Quick add and Import only refresh Home's provider when Home is showing (`ref.exists`).
+  Invalidating it otherwise starts it, and it then waits on the link state.
+- Tests:
+  - `ledger_builders_test.dart` (12): the dashboard cases, both budget styles, carryover, the month
+    range;
+  - `ledger_screens_test.dart` (4): Home empty and filled, setting a budget amount, editing and
+    removing a row, all with no backend;
+  - 171 pass, 1 skipped. The analyzer shows the same 15 notes as before.
+
 ## Phase 5: Sync with Actual
 
 The backend gets routes for the ledger, each one budget turn:
