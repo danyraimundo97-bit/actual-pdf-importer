@@ -77,7 +77,7 @@ interface SpendingInsights {
 
 **Route:** `POST /insights` with body `{ from, to, budgetSyncId?, budgetPassword? }`
 - The route builds the summary (Phase 1), calls `getAiProvider().generateSpendingInsights(summary)`, and returns `{ summary, insights }`, so the client can show real numbers next to the AI's interpretation.
-- This must work even when `PARSER_MODE=regex`. Check `provider.isConfigured()` per request, and throw a new typed error `AiNotConfiguredError` (code `AI_NOT_CONFIGURED`) in `src/errors.ts` if it fails. Don't add a startup check, since insights are optional.
+- Check `provider.isConfigured()` per request, and throw `AiNotConfiguredError` (code `AI_NOT_CONFIGURED`, already in `src/errors.ts` since the parser moved to the app) if it fails. Don't add a startup check, since insights are optional.
 - Wrap provider failures in a typed `AiProviderError` (code `AI_PROVIDER_ERROR`), which covers rate limits and invalid JSON. Clients branch on `code`.
 - Extend `GET /config` with `insightsAvailable: boolean`, so the app can hide the AI button.
 

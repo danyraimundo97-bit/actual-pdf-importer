@@ -18,9 +18,7 @@ function toRawTransaction(t: AiTransaction): RawTransaction {
 export const aiParser: BankParser = {
   bankId: 'ai',
 
-  // Deliberately the most permissive matcher of the group — this parser is
-  // a last-resort fallback, and MUST stay last in src/index.ts's PARSERS
-  // list so bank-specific regex parsers get first refusal.
+  // Any statement: the provider reads every bank.
   canParse(_fullText: string): boolean {
     return getAiProvider().isConfigured();
   },
@@ -44,14 +42,13 @@ export const aiParser: BankParser = {
 };
 
 /**
- * PARSER_MODE=ai's direct path: send the PDF's raw bytes straight to
- * whichever AI provider is configured, no local text extraction step at
- * all.
+ * The direct path: send the PDF's raw bytes straight to whichever AI
+ * provider is configured, no local text extraction step at all.
  */
 export async function parseAiFromPdf(pdfBuffer: Buffer): Promise<RawTransaction[]> {
   const provider = getAiProvider();
   if (!provider.isConfigured()) {
-    throw new Error(`PARSER_MODE=ai but provider "${provider.name}" is not configured.`);
+    throw new Error(`AI parser invoked but provider "${provider.name}" is not configured.`);
   }
 
   const started = Date.now();

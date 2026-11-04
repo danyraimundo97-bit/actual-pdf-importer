@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'inline_note.dart';
 
-/// Shown on Import when the backend's PARSER_MODE means a statement could
-/// leave the machine. The project's headline claim is "100% offline", and
+/// Shown on Import when statements go to the backend (reading on the phone
+/// is off) and it reads them with an AI provider, so they leave the machine. The project's headline claim is "100% offline", and
 /// this is the one place the UI has to tell the truth about when it isn't.
 class PrivacyBanner extends StatefulWidget {
   final String providerName;

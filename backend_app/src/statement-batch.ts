@@ -36,7 +36,7 @@ export type StatementResult<T> =
  * relative to the batch, so a movement appearing in two overlapping
  * statements would get two different ids and import twice.
  *
- * Deliberately sequential: in PARSER_MODE=ai each file is a provider call,
+ * Deliberately sequential: each file is an AI provider call,
  * and firing a whole batch concurrently is how you hit a rate limit. Local
  * parsing is CPU-bound in a single-threaded runtime, so concurrency would
  * buy nothing there either.

@@ -140,8 +140,7 @@ class ConnectionController extends AutoDisposeNotifier<ConnectionCheck> {
         config: config,
         actualStatus: config.actualConfigured ? ConnectionStatus.connected : ConnectionStatus.idle,
         message:
-            'Connected. Parser mode: ${config.parserMode}'
-            '${config.usesAi ? ', using ${config.aiProvider}' : ''}.',
+            'Connected.${config.usesAi ? ' Statements the phone can\'t read go to ${config.aiProvider}.' : ''}',
       );
       await loadActual();
       ref.invalidate(backendConfigProvider);

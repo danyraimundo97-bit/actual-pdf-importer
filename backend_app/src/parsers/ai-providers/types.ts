@@ -20,7 +20,7 @@ export interface AiProvider {
    * Extract transactions directly from the PDF's raw bytes, skipping local
    * text extraction entirely — the model reasons over the real layout
    * (tables, columns) instead of a pdf-parse dump that can scramble it.
-   * Used when PARSER_MODE=ai.
+   * Used for statements without a password.
    */
   extractTransactionsFromPdf(pdfBuffer: Buffer): Promise<AiTransaction[]>;
 }

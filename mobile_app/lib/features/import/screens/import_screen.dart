@@ -331,7 +331,9 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
                     onReview: () => _review(item),
                     onUnlock: () => _unlock(item),
                     onRetry: () => ref.read(inboxProvider.notifier).retry(item.id),
-                    onSendToBackend: hasBackend ? () => _sendToBackend(item) : null,
+                    onSendToBackend: hasBackend && (backendConfig?.readsStatements ?? true)
+                        ? () => _sendToBackend(item)
+                        : null,
                     onRemove: () => ref.read(inboxProvider.notifier).remove(item.id),
                   ),
                 ),

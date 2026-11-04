@@ -1,114 +1,42 @@
 import pdfParse from 'pdf-parse';
-import { BankParser, RawTransaction } from './types';
+import { RawTransaction } from './types';
 import {
-  UnrecognizedBankError,
+  AiNotConfiguredError,
   PdfPasswordRequiredError,
   PdfPasswordIncorrectError,
   PdfUnreadableError,
 } from './errors';
-import { activoBankParser } from './parsers/activobank';
-import { moeyParser } from './parsers/moey';
-import { tradeRepublicParser } from './parsers/traderepublic';
 import { aiParser, parseAiFromPdf } from './parsers/aiparser';
 import { getAiProvider } from './parsers/ai-providers';
 import { logger } from './logger';
 
 const log = logger.child({ area: 'parser' });
 
-export type ParserMode = 'regex' | 'ai' | 'both';
-
 /**
- * PARSER_MODE is the switch: pick which parsing strategy is active without
- * touching code.
- *   - "regex" (default): only the local ActivoBank/moey!/Trade Republic
- *     parsers run. Fully offline — nothing is ever sent anywhere.
- *   - "ai": every statement skips local text extraction entirely and its
- *     raw PDF bytes go straight to the configured AI provider (see
- *     processStatement() below) — the model reasons over the real layout
- *     instead of a pdf-parse text dump. Exception: a password-protected
- *     statement in this mode still has to go through local text
- *     extraction first (see processStatement) since the AI provider has
- *     no way to decrypt it.
- *   - "both": regex parsers run first (cheap, local, on extracted text);
- *     the AI parser is a text-based fallback only for statements none of
- *     them recognized — it reuses the text already extracted for the
- *     regex pass rather than resending the PDF.
+ * Statements are read on the phone (mobile_app/packages/statement_parser).
+ * The backend only reads the ones the phone can't, with the AI provider
+ * (AI_PROVIDER + its API key). Without one, POST /parse answers
+ * AI_NOT_CONFIGURED and everything else works as usual.
+ *
+ * The bank-specific regex parsers and PARSER_MODE were removed once the
+ * Dart port had proven itself (docs/plans/dart-parser.md, Phase 6).
  */
-function resolveParserMode(): ParserMode {
-  const raw = (process.env.PARSER_MODE ?? 'regex').trim().toLowerCase();
-  if (raw === 'regex' || raw === 'ai' || raw === 'both') return raw;
-  log.warn({ parserMode: raw }, 'Unknown PARSER_MODE — falling back to "regex"');
-  return 'regex';
+export function aiReadsStatements(): boolean {
+  return getAiProvider().isConfigured();
 }
 
-const REGEX_PARSERS: BankParser[] = [activoBankParser, moeyParser, tradeRepublicParser];
-
-function buildTextParserList(mode: ParserMode): BankParser[] {
-  switch (mode) {
-    case 'regex':
-      return REGEX_PARSERS;
-    case 'both':
-      return [...REGEX_PARSERS, aiParser];
-    case 'ai':
-      // Not used for the direct-PDF path in processStatement() — only
-      // reached when an "ai"-mode statement turns out to be
-      // password-protected and has to fall back to text extraction.
-      return [aiParser];
-  }
+if (process.env.PARSER_MODE) {
+  log.warn(
+    { parserMode: process.env.PARSER_MODE },
+    'PARSER_MODE is no longer used: statements are read on the phone, and here only by the AI provider. Remove it from .env.',
+  );
 }
-
-export const PARSER_MODE = resolveParserMode();
-const TEXT_PARSERS: BankParser[] = buildTextParserList(PARSER_MODE);
-
-// Fail loudly at startup rather than on the first upload: a misconfigured
-// PARSER_MODE/AI_PROVIDER pairing should never surface as a mysterious
-// error on every request. Ask the provider itself whether it's configured,
-// rather than hardcoding which env var that implies — that stays correct
-// no matter which AI_PROVIDER is selected.
-if (PARSER_MODE === 'ai' || PARSER_MODE === 'both') {
-  const provider = getAiProvider();
-  if (!provider.isConfigured()) {
-    const message = `PARSER_MODE=${PARSER_MODE} requires AI provider "${provider.name}" to be configured (check its API key in .env).`;
-    if (PARSER_MODE === 'ai') {
-      throw new Error(message);
-    }
-    log.warn(`${message} — the AI fallback will never trigger.`);
-  }
-}
-
 log.info(
-  { parserMode: PARSER_MODE, parsers: TEXT_PARSERS.map((p) => p.bankId) },
-  PARSER_MODE === 'ai'
-    ? `PARSER_MODE=ai — PDFs go straight to AI provider "${getAiProvider().name}", no local text extraction (unless a statement turns out to be password-protected).`
-    : `PARSER_MODE=${PARSER_MODE} — active parsers: ${TEXT_PARSERS.map((p) => p.bankId).join(', ')}`,
+  { aiProvider: getAiProvider().name, aiConfigured: aiReadsStatements() },
+  aiReadsStatements()
+    ? `Statements sent here are read by AI provider "${getAiProvider().name}".`
+    : 'No AI provider configured: the backend does not read statements (the phone does).',
 );
-
-/**
- * Picks a parser by content sniffing rather than trusting a filename or
- * user-supplied hint, since PDFs get renamed/forwarded and a wrong guess
- * here silently corrupts every transaction downstream. Only used for the
- * text-based paths ("regex" and "both", or "ai" degraded to text — see
- * processStatement()).
- */
-export async function identifyAndParse(
-  fullText: string,
-): Promise<{ bankId: BankParser['bankId']; transactions: RawTransaction[] }> {
-  for (const parser of TEXT_PARSERS) {
-    if (parser.canParse(fullText)) {
-      const started = Date.now();
-      const transactions = await parser.parse(fullText);
-      log.debug(
-        { bank: parser.bankId, lines: fullText.split('\n').length, transactions: transactions.length, ms: Date.now() - started },
-        'Statement parsed',
-      );
-      transactions.forEach((tx, n) => log.debug({ bank: parser.bankId, n, date: tx.date, payee: tx.payee }, 'Parsed transaction'));
-      return { bankId: parser.bankId, transactions };
-    }
-    log.debug({ bank: parser.bankId }, 'canParse: no match');
-  }
-  log.debug({ lines: fullText.split('\n').length }, 'No parser recognized the statement');
-  throw new UnrecognizedBankError();
-}
 
 /**
  * Runs pdf-parse's local text extraction, optionally against a
@@ -122,7 +50,7 @@ export async function identifyAndParse(
  * not "simplify" this back to passing the buffer directly, or encrypted
  * statements silently stop working.
  */
-async function extractText(pdfBuffer: Buffer, password?: string): Promise<string> {
+export async function extractText(pdfBuffer: Buffer, password?: string): Promise<string> {
   try {
     const { text } = await pdfParse({ data: pdfBuffer, password } as unknown as Buffer);
     return text;
@@ -138,28 +66,21 @@ async function extractText(pdfBuffer: Buffer, password?: string): Promise<string
 
 /**
  * Single entry point server.ts calls with the uploaded PDF's raw bytes.
- * Decides, based on PARSER_MODE, whether to extract text locally first
- * (regex/both, or ai-with-a-password) or send the PDF straight to the AI
- * provider (ai, unencrypted).
+ * The PDF goes straight to the AI provider, which reads the real layout.
+ * A password-protected one can't (the provider can't decrypt it), so it is
+ * decrypted and extracted to text here first — nothing leaves the machine
+ * for that step — and the text goes to the provider instead.
  */
 export async function processStatement(
   pdfBuffer: Buffer,
   password?: string,
-): Promise<{ bankId: BankParser['bankId']; transactions: RawTransaction[] }> {
-  if (PARSER_MODE === 'ai' && !password) {
-    const transactions = await parseAiFromPdf(pdfBuffer);
-    return { bankId: 'ai', transactions };
+): Promise<{ bankId: 'ai'; transactions: RawTransaction[] }> {
+  if (!aiReadsStatements()) throw new AiNotConfiguredError(getAiProvider().name);
+  if (!password) {
+    return { bankId: 'ai', transactions: await parseAiFromPdf(pdfBuffer) };
   }
-
-  // regex / both, or an "ai"-mode statement that needs a password: extract
-  // text locally — nothing leaves the machine for this step — then run it
-  // through the text-based parser chain. In pure "ai" mode with a
-  // password that chain is just [aiParser] (see buildTextParserList):
-  // lower fidelity than sending the raw PDF, but it reuses code that
-  // already exists for PARSER_MODE=both rather than adding a PDF
-  // decryption dependency to the backend.
   const text = await extractText(pdfBuffer, password);
-  return identifyAndParse(text);
+  return { bankId: 'ai', transactions: await aiParser.parse(text) };
 }
 
 export * from './types';

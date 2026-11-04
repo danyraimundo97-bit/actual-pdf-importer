@@ -30,8 +30,7 @@ Edit `.env` — at minimum:
 | `ACTUAL_PASSWORD` | Your Actual server password (with `ACTUAL_SERVER_URL`) |
 | `ACTUAL_BUDGET_SYNC_ID` | Default budget's sync id (Actual → Settings → Show advanced settings) |
 | `IMPORT_TOKEN` | A shared secret the app must send. Leave empty only for quick local tests (no auth) |
-| `PARSER_MODE` | `regex` (default, fully offline), `ai`, or `both` |
-| `AI_PROVIDER` + `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Only needed when `PARSER_MODE` is `ai` or `both` |
+| `AI_PROVIDER` + `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Optional: lets the backend read statements the phone can't (they're sent to that provider) |
 | `PORT` | Defaults to `3000` |
 
 See the comments in `.env.example` for the full list.
@@ -56,8 +55,6 @@ Run the tests:
 ```bash
 npm test         # rebuilds, then runs the compiled tests in dist/
 ```
-
-> The server fails at startup if `PARSER_MODE` needs an AI provider whose API key is missing — check the console output if it exits immediately.
 
 ## 2. Mobile app (`mobile_app/`)
 

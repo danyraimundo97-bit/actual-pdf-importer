@@ -464,6 +464,34 @@ memory when there is a backend, and otherwise there are none.
 - Update `CLAUDE.md`, `HowtoTest.md` (Dart side of the reconciliation), and the Todo.
 - iOS share sheet (TODO §1) is separate, but this branch makes it more valuable.
 
+### Phase 6 as built (2026-11-04)
+
+Done after the device parser was checked on the phone with real statements.
+
+- Backend:
+  - removed the regex parsers (`activobank.ts`, `moey.ts`, `traderepublic.ts`,
+    `statement-scanner.ts`), their tests and the PT amount/date helpers;
+  - removed `PARSER_MODE` (a leftover value only logs a warning) and the legacy `POST /import`;
+  - `processStatement` is AI-only: raw PDF to the provider, or local decrypt + text for a
+    password-protected one. Without a provider it throws `AiNotConfiguredError`
+    (`AI_NOT_CONFIGURED`, 409), and the backend no longer refuses to start;
+  - `GET /config` sends `parserMode` `"ai"` or `"off"`;
+  - kept `pdf-parse` (`extractText`, exported): password-protected statements still need it;
+  - `parser-fixtures.test.ts` became `imported-ids.test.ts` (the shared golden ids only). The
+    parser fixtures stay for the Dart package;
+  - `pdf-password.test.ts` tests `extractText` directly, plus `AI_NOT_CONFIGURED`.
+- App:
+  - `BackendConfig.readsStatements` (`parserMode != "off"`, so older backends still count);
+  - Import offers "send to backend" only when it can read statements;
+  - an `AI_NOT_CONFIGURED` failure says to turn on "Read statements on this phone" or add a key;
+  - Settings and connection copy no longer mention parser modes.
+- Docs: `CLAUDE.md`, `.env.example`, the backend `README.md`, `RUNNING.md`, `INSTALL.md`,
+  `HowToRun.md`, `HowtoTest.md`. `Todo.md` isn't touched here (there's an uncommitted edit on
+  `feature/forget-mappings`).
+- Checked: backend 91/92 (the failure is the known Node 26 "bad XRef entry" in the encrypted-PDF
+  test, unchanged); app 109 pass, 1 skipped; a real start with no AI key gives the warning,
+  `"parserMode":"off"`, `AI_NOT_CONFIGURED` from `/parse` and 404 from `/import`.
+
 ## Done criteria
 
 - `dart test` in the package and `npm test` both run the shared fixtures green.

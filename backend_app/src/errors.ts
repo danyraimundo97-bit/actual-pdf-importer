@@ -18,6 +18,7 @@ export type ErrorCode =
   | 'UNAUTHORIZED'
   | 'AUTH_REQUIRED'
   | 'ACTUAL_NOT_CONFIGURED'
+  | 'AI_NOT_CONFIGURED'
   | 'ACTUAL_UNREACHABLE'
   | 'ACTUAL_AUTH_FAILED'
   | 'ACTUAL_VERSION_TOO_OLD'
@@ -167,6 +168,21 @@ export class ActualNotConfiguredError extends ImporterError {
     super(
       'ACTUAL_NOT_CONFIGURED',
       'No Actual server is connected. Connect one in the app (Settings → Connection).',
+      409,
+    );
+  }
+}
+
+/**
+ * A statement was sent to the backend, which has no AI provider to read it
+ * with. Statements are read on the phone; the backend only reads the ones
+ * the phone can't, and only with AI_PROVIDER and its API key set.
+ */
+export class AiNotConfiguredError extends ImporterError {
+  constructor(providerName: string) {
+    super(
+      'AI_NOT_CONFIGURED',
+      `This backend can't read statements: AI provider "${providerName}" has no API key set in its .env.`,
       409,
     );
   }

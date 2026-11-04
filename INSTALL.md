@@ -30,8 +30,9 @@ Edit `backend_app/.env`. The three that matter for a server:
 | `ACTUAL_SERVER_URL` | *Optional.* Your Actual server, e.g. `http://192.168.1.50:5006`. Not `localhost` — see step 4. Leave it empty to connect from the app instead (Settings → Connection); setting it here locks the connection so the app can't change it. |
 | `ACTUAL_PASSWORD` | Your Actual server password, if you set `ACTUAL_SERVER_URL`. |
 
-`ACTUAL_BUDGET_SYNC_ID` is optional (the app can pick a budget at runtime). Leave `PARSER_MODE=regex`
-unless you want the AI fallback, in which case also set `AI_PROVIDER` and the matching API key.
+`ACTUAL_BUDGET_SYNC_ID` is optional (the app can pick a budget at runtime). Statements are
+read on the phone; set `AI_PROVIDER` and the matching API key only if you want the backend to read
+the ones the phone can't (they're sent to that AI provider).
 
 **Do not set `ACTUAL_DATA_DIR` or `CATEGORY_DB_PATH`** — `docker-compose.yml` sets those to paths
 inside the container's data volume and they must stay that way.
@@ -48,7 +49,7 @@ docker compose logs -f
 A healthy start logs three lines:
 
 ```
-[parsers] PARSER_MODE=regex — active parsers: activobank, moey, traderepublic
+[parser] No AI provider configured: the backend does not read statements (the phone does).
 PDF importer backend listening on port 3000
 ```
 
@@ -161,8 +162,9 @@ is `0600` and owned by a user other than uid 1000, the `node` user can't read it
 `python3 make g++` for platforms with no prebuilt binary. If it still fails you're likely low on
 memory — a 1GB Raspberry Pi may need swap.
 
-**`422` with `code: "BANK_UNRECOGNIZED"` or `"NO_TRANSACTIONS"`.** Not a deployment problem: the
-statement's layout isn't one the parsers know, or it changed. See `backend_app/Docs/HowtoTest.md`.
+**`409` with `code: "AI_NOT_CONFIGURED"`.** A statement was sent to the backend, which reads
+statements only with an AI provider. Read it on the phone (Settings → "Read statements on this
+phone"), or set `AI_PROVIDER` and its API key in `.env`.
 
 **Everything returns `401`.** The `X-Import-Token` header doesn't match `IMPORT_TOKEN`. Note the
 app stores the token in secure storage — re-enter it in Settings after changing it.

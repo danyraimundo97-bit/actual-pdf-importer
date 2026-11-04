@@ -407,6 +407,9 @@ class InboxController extends Notifier<List<InboxItem>> {
       } else {
         final message = switch (e.code) {
           'BANK_UNRECOGNIZED' => '${e.message} This bank or layout may not be supported yet.',
+          'AI_NOT_CONFIGURED' =>
+            "Your backend can't read statements: it has no AI provider set up. Turn on "
+                '"Read statements on this phone" in Settings, or add an AI API key to the backend.',
           _ when e.isUnauthorized => 'The importer rejected the access token. Check Settings.',
           _ => e.message,
         };

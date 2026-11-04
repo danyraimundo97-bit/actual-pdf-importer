@@ -1,5 +1,8 @@
 class BackendConfig {
-  final String parserMode; // 'regex' | 'ai' | 'both'
+  /// "ai" when the backend reads statements (with its AI provider), "off"
+  /// when it doesn't. Backends from before the phone read statements also
+  /// send "regex" or "both".
+  final String parserMode;
   final String? aiProvider;
   final bool aiConfigured;
   final String? defaultBudgetSyncId;
@@ -23,6 +26,9 @@ class BackendConfig {
   /// Whether a statement parsed right now could leave the machine — drives
   /// the privacy banner on the Import screen.
   bool get usesAi => parserMode == 'ai' || parserMode == 'both';
+
+  /// Whether sending a statement to this backend can work at all.
+  bool get readsStatements => parserMode != 'off';
 
   factory BackendConfig.fromJson(Map<String, dynamic> json) {
     return BackendConfig(

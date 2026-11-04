@@ -42,6 +42,8 @@ class _FakeImporterApi implements ImporterApi {
         );
       case 'odd.pdf':
         throw const ApiException(message: 'Unrecognized statement.', code: 'BANK_UNRECOGNIZED');
+      case 'no-ai.pdf':
+        throw const ApiException(message: 'No AI provider.', code: 'AI_NOT_CONFIGURED');
     }
     return const ParseResult(bankId: 'moey', transactions: []);
   }
@@ -144,6 +146,14 @@ void main() {
     expect(api.parsed, ['ok.pdf', 'odd.pdf']);
     expect(statuses(), [InboxStatus.ready, InboxStatus.failed]);
     expect(container.read(inboxProvider)[1].error, contains('may not be supported'));
+  });
+
+  test("a backend without an AI provider says how to read the statement instead", () async {
+    inbox().add(filename: 'no-ai.pdf', bytes: pdf);
+    await _settle();
+
+    expect(statuses(), [InboxStatus.failed]);
+    expect(container.read(inboxProvider).single.error, contains('Read statements on this phone'));
   });
 
   test('a locked statement waits for a password, then parses', () async {

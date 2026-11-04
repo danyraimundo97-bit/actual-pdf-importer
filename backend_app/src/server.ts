@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import express, { NextFunction, Request, Response } from 'express';
-import { processStatement, PARSER_MODE } from './index';
+import { aiReadsStatements, processStatement } from './index';
 import {
   AuthRequiredError,
   ConnectionLockedError,
@@ -165,11 +165,6 @@ const MAX_PARSE_FILES = 20;
 // POST /parse takes either field name, so one-file clients sending
 // "statement" and multi-file clients sending "statements" both just work.
 const receiveStatements = receiveFiles({ fields: ['statement', 'statements'], maxFiles: MAX_PARSE_FILES });
-const receiveStatement = receiveFiles({
-  fields: ['statement'],
-  maxFiles: 1,
-  tooManyHint: 'Use POST /parse to parse several statements, then POST /import/confirm.',
-});
 
 function readPassword(body: Record<string, unknown>): string | undefined {
   return typeof body.password === 'string' && body.password ? body.password : undefined;
@@ -334,53 +329,6 @@ app.post('/import/undo', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * Kept unchanged for backwards compatibility: parse-and-import in one
- * shot, no review step. New clients should prefer POST /parse followed by
- * POST /import/confirm.
- */
-app.post('/import', receiveStatement, async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res
-      .status(400)
-      .json({ error: 'No file uploaded. Expected multipart field "statement".', code: 'MISSING_FIELD' });
-  }
-
-  const accountId = req.body.accountId as string | undefined;
-  if (!accountId) {
-    return res
-      .status(400)
-      .json({ error: 'Missing required field "accountId" (the Actual account to import into).', code: 'MISSING_FIELD' });
-  }
-
-  const password = typeof req.body.password === 'string' && req.body.password ? req.body.password : undefined;
-
-  try {
-    const budget = resolveBudgetRef(req.body.budgetSyncId, req.body.budgetPassword);
-    const { bankId, transactions } = await processStatement(req.file.buffer, password);
-
-    if (transactions.length === 0) {
-      return res.status(422).json({
-        error: `Recognized "${bankId}" but extracted zero transactions. The statement layout may have changed.`,
-        code: 'NO_TRANSACTIONS',
-        bankId,
-      });
-    }
-
-    const result = await importToActual(budgetSession, budget, accountId, transactions);
-
-    return res.json({
-      bankId,
-      parsed: transactions.length,
-      added: result.added,
-      updated: result.updated,
-      categorized: result.categorized,
-    });
-  } catch (err) {
-    sendImporterError(res, err, 'Internal error while processing the statement.');
-  }
-});
-
 // --- Actual metadata (accounts / categories / budgets) ------------------
 
 app.get('/accounts', async (req: Request, res: Response) => {
@@ -511,12 +459,13 @@ app.get('/budget-month', async (req: Request, res: Response) => {
 });
 
 app.get('/config', (_req: Request, res: Response) => {
-  const aiInUse = PARSER_MODE === 'ai' || PARSER_MODE === 'both';
-  const provider = aiInUse ? getAiProvider() : undefined;
+  // parserMode: "ai" when this backend reads statements (with its AI
+  // provider), "off" when it doesn't. Older apps read the field.
+  const ai = aiReadsStatements();
   res.json({
-    parserMode: PARSER_MODE,
-    aiProvider: provider?.name,
-    aiConfigured: provider ? provider.isConfigured() : false,
+    parserMode: ai ? 'ai' : 'off',
+    aiProvider: getAiProvider().name,
+    aiConfigured: ai,
     defaultBudgetSyncId: DEFAULT_BUDGET_SYNC_ID || undefined,
     actual: { configured: budgetSession.isConfigured(), locked: CONNECTION_LOCKED },
   });

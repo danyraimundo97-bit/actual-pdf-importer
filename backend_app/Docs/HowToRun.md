@@ -42,7 +42,7 @@ below explain each step.
 | Flutter SDK with Dart 3.13+ | mobile app | `flutter --version` (update with `flutter upgrade`) |
 | An Actual Budget server | importing | open `http://localhost:5006` in a browser |
 | Docker *(optional)* | running Actual and/or the backend in containers | `docker compose version` |
-| Anthropic or Gemini API key *(optional)* | only for `PARSER_MODE=ai` or `both` | — |
+| Anthropic or Gemini API key *(optional)* | only for the backend to read statements the phone can't | — |
 
 > **Windows / PowerShell:** commands in this file are written for Git Bash. In PowerShell, use
 > `Copy-Item .env.example .env` instead of `cp`, and `curl.exe` instead of `curl` (in Windows
@@ -82,8 +82,7 @@ Edit `.env`:
 | `ACTUAL_PASSWORD` | The Actual server password from step 1 | with `ACTUAL_SERVER_URL` |
 | `ACTUAL_BUDGET_SYNC_ID` | The sync id from step 1 | no — the app can choose |
 | `IMPORT_TOKEN` | A shared secret the app sends on every request | strongly recommended |
-| `PARSER_MODE` | `regex` (default, fully offline), `ai`, or `both` | no |
-| `AI_PROVIDER` + `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Only if `PARSER_MODE` is `ai` or `both` | conditional |
+| `AI_PROVIDER` + `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Lets the backend read statements the phone can't, with that AI provider | no |
 | `PORT` | Defaults to `3000` | no |
 
 Leave `ACTUAL_DATA_DIR` and `CATEGORY_DB_PATH` as they are; both are created automatically.
@@ -110,12 +109,11 @@ docker compose up -d --build # from the repo root — see INSTALL.md
 A healthy start prints:
 
 ```
-[parsers] PARSER_MODE=regex — active parsers: activobank, moey, traderepublic
+[parser] No AI provider configured: the backend does not read statements (the phone does).
 PDF importer backend listening on port 3000
 ```
 
-If it exits immediately, read the last lines: a `PARSER_MODE` of `ai`/`both` without the matching
-API key fails at startup on purpose, rather than on your first upload.
+With an AI key set, that line names the provider instead.
 
 ### Check it
 
@@ -132,8 +130,9 @@ your budgets, the `ACTUAL_*` settings are right.
 
 ### Try a statement without the app *(optional)*
 
-`POST /parse` reads a PDF and returns the transactions **without touching Actual**, so it's the
-fastest way to see whether a statement is recognized:
+Statements are read on the phone. `POST /parse` is the backend's fallback: it sends the PDF to
+your AI provider and returns the transactions **without touching Actual**. It needs
+`AI_PROVIDER` and its API key:
 
 ```bash
 curl -X POST http://localhost:3000/parse \
@@ -141,8 +140,8 @@ curl -X POST http://localhost:3000/parse \
   -F "statement=@Docs/tests/Moey - julho 2026.pdf"
 ```
 
-Supported banks with the default `regex` mode: **ActivoBank, moey!, Trade Republic**. Anything else
-returns `BANK_UNRECOGNIZED` unless you switch `PARSER_MODE` to `both` or `ai`.
+Without an AI key it answers `AI_NOT_CONFIGURED`. The phone reads **ActivoBank, moey!, Trade
+Republic** by itself.
 
 ## Step 3 — Mobile app (`mobile_app/`)
 
@@ -195,10 +194,9 @@ nothing.
 | Every request returns `401` | Token in the app doesn't match `IMPORT_TOKEN`. Re-enter it in Settings after changing `.env`, and restart the backend. |
 | `/health` works but `/budgets` fails | Backend can't reach or log into Actual — check `ACTUAL_SERVER_URL` and `ACTUAL_PASSWORD`. In Docker, `localhost` means the container itself; see `INSTALL.md`. |
 | `NO_BUDGET_SELECTED` | No budget picked in the app and no `ACTUAL_BUDGET_SYNC_ID` in `.env`. |
-| `BANK_UNRECOGNIZED` | Not ActivoBank / moey! / Trade Republic, and `PARSER_MODE=regex`. |
-| `NO_TRANSACTIONS` | The parser recognized the bank but found no rows — the bank probably changed its layout. See `HowtoTest.md`. |
-| `TOO_MANY_FILES` | More than 20 files sent to `/parse` (or more than 1 to the legacy `/import`). |
+| `AI_NOT_CONFIGURED` | A statement was sent to the backend, which has no AI key. Read it on the phone (Settings → "Read statements on this phone"), or set `AI_PROVIDER` and its key. |
+| `NO_TRANSACTIONS` | The AI provider found no rows in the statement. |
+| `TOO_MANY_FILES` | More than 20 files sent to `/parse`. |
 | `FILE_TOO_LARGE` / `BATCH_TOO_LARGE` | One file over 20MB / all files together over 50MB. The backend log has an `[upload]` line with the count and total size. |
 | `PDF_PASSWORD_REQUIRED` / `PDF_PASSWORD_INCORRECT` | The statement is encrypted. The app prompts for the password; with `curl`, add `-F "password=…"`. |
 | `SELF_SIGNED_CERT_IN_CHAIN` | Actual uses HTTPS with a self-signed cert. Set `NODE_EXTRA_CA_CERTS` to its CA — see `INSTALL.md`. |
-| Backend exits right after starting | `PARSER_MODE` is `ai`/`both` but the API key for `AI_PROVIDER` is missing. |

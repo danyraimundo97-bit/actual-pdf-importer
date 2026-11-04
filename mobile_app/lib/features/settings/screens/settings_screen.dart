@@ -198,8 +198,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               parseOnDevice
                   ? "Statements stay on the phone. One the app can't read is sent to the "
                         'backend only if you ask.'
-                  : 'Statements are sent to the importer address above. They reach a cloud '
-                        'service only when its parser mode is "ai" or "both".',
+                  : "Statements are sent to the backend, which reads them with its AI provider.",
               style: muted,
             ),
             value: parseOnDevice,

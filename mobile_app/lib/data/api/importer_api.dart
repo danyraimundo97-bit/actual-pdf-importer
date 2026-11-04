@@ -203,8 +203,8 @@ class ImporterApi {
     return BudgetMonth.fromJson(res.data as Map<String, dynamic>);
   }
 
-  /// POST /parse. Long timeout override: in PARSER_MODE=ai/both a large
-  /// statement can genuinely take close to a minute.
+  /// POST /parse. Long timeout override: the backend reads statements with
+  /// its AI provider, and a large one can genuinely take close to a minute.
   Future<ParseResult> parseStatement({
     required Uint8List bytes,
     required String filename,

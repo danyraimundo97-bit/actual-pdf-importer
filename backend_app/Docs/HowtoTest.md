@@ -5,10 +5,11 @@ Everything here is run from `backend_app/` unless it says otherwise.
 | What | Command |
 | --- | --- |
 | Full backend suite | `npm test` |
-| One test file | `npm run build && node --test dist/__tests__/moey.test.js` |
+| One test file | `npm run build && node --test dist/__tests__/actual.test.js` |
 | Type-check only | `npm run build` |
 | Server for manual testing | `npm run dev` |
 | Flutter analyzer + tests | `cd ../mobile_app && flutter analyze && flutter test` |
+| Statement parsers (Dart) | `cd ../mobile_app/packages/statement_parser && dart test` |
 
 ## Automated backend tests
 
@@ -22,7 +23,7 @@ false pass. There's no watch mode and no single-test npm script — to iterate o
 and point `node --test` at the compiled path:
 
 ```bash
-npm run build && node --test dist/__tests__/moey.test.js
+npm run build && node --test dist/__tests__/actual.test.js
 ```
 
 Runner is Node's built-in `node:test` with `node:assert/strict`. No Jest, no Vitest, no config
@@ -30,37 +31,28 @@ file.
 
 ### What's covered today
 
-51 tests across ten files:
+The bank parsers live in the app now (`mobile_app/packages/statement_parser`, `dart test`), tested
+against the shared `fixtures/` and, when `Docs/tests/` is present, the real statements. The backend
+suite covers the rest:
 
 | File | Covers |
 | --- | --- |
+| `imported-ids.test.ts` | The shared golden `importedId`s in `fixtures/imported-ids.json`, the same ones the Dart package checks |
+| `actual.test.ts` | `importToActual` payload mapping, the Actual list functions, and the `assignImportedIds` dedupe rules, including **golden id literals** |
 | `statement-batch.test.ts` | Per-file isolation of failures, `NO_TRANSACTIONS` keeping its `bankId`, no leaking of unexpected error text, sequential ordering, and the per-statement dedupe-id rule |
-| `activobank.test.ts` | Three-line movements, year from the period header (incl. rollover), the balance-driven amount/balance split, payee prefixes, skip-and-resync on an unresolvable row, `canParse` rejection of a mere mention |
-| `traderepublic.test.ts` | Two-line dates, wrapped types, direction from the balance delta, a description ending in a digit, mid-table page footer, missing-anchor degradation, `canParse` rejection of a truncated payee mention |
-| `actual.test.ts` | `importToActual` payload mapping, `listAccounts`/`listBudgets`/`listCategoryGroups`, and the `assignImportedIds` dedupe rules — including **golden id literals** |
-| `budget-session.test.ts` | Turn serialization, no re-download of an already-loaded budget, failed download isn't marked loaded, throwing callbacks free the queue, shutdown waits for in-flight work |
-| `categorydb.test.ts` | Per-budget scoping with the unscoped fallback |
-| `categorydb-migration.test.ts` | Migrating a pre-scoping table into the unscoped bucket |
-| `moey.test.ts` | `canParse` accept/reject, date + cleaned payee + signed amount, the savings-section cutoff, and a page-code regression |
+| `pdf-password.test.ts` | pdf.js password errors → `PdfPasswordRequiredError` / `PdfPasswordIncorrectError`, a non-PDF → `PDF_UNREADABLE`, and `AI_NOT_CONFIGURED` without an AI key |
 | `upload.test.ts` | Upload limits over real HTTP: exact file count in `TOO_MANY_FILES`, `FILE_TOO_LARGE` vs `BATCH_TOO_LARGE`, wrong field name, the rejection log line |
-| `pdf-password.test.ts` | pdf.js password errors → `PdfPasswordRequiredError` / `PdfPasswordIncorrectError` |
+| `budget-session.test.ts` | Turn serialization, no re-download of an already-loaded budget, failed download isn't marked loaded, throwing callbacks free the queue, shutdown waits for in-flight work |
+| `categorydb*.test.ts` | Per-budget scoping with the unscoped fallback, the pre-scoping migration, and the phone sync |
+| `removal-log.test.ts`, `transactions.test.ts`, `dashboard.test.ts`, `account-page.test.ts`, `budget-month.test.ts`, `actual-connection.test.ts`, `logger.test.ts` | The soft-delete log, quick add, the read-only screens, the optional Actual connection, and log redaction |
 
 Both Actual-facing suites drive a fake `ActualAdapter` (`src/__tests__/fake-actual.ts`), so
 **no test needs a running Actual server**. The category-DB suites each `mkdtemp` their own
 SQLite file under the OS temp dir, so running tests never touches your dev
 `./data/categories.db`.
 
-### Expected console noise
-
-A clean run prints these. They are assertions about failure handling working, not failures:
-
-```
-[moey] skipping block with no amount/balance: "Trf imediata LOJA GRANDE"
-[parsers] PARSER_MODE=regex — active parsers: activobank, moey, traderepublic
-[traderepublic] no SALDO INICIAL in the summary block — the first movement will be skipped
-```
-
-Judge the run by the trailing `pass`/`fail` counts.
+Judge the run by the trailing `pass`/`fail` counts; warning lines in the output are assertions
+about failure handling, not failures.
 
 ### Known gaps
 
@@ -68,37 +60,18 @@ Judge the run by the trailing `pass`/`fail` counts.
   wiring and auth are covered only by the manual flow below. Batch *orchestration* is unit-tested (`statement-batch.test.ts`) because
   it lives outside the route handler, but nothing asserts the handler calls it correctly.
 - **No AI-provider tests.** `src/parsers/ai-providers/` is untested.
-- **Fixtures are synthetic.** All three parsers are verified against real statements only by
-  hand, via the reconciliation procedure below. Nothing in `npm test` reads `Docs/tests/`
-  (those PDFs are gitignored personal statements), so a real-world layout change surfaces as a
-  422 at upload time, not as a failing test.
+- **Real statements aren't in `npm test`.** The Dart package's `real_statements_test.dart` reads
+  `Docs/tests/` (gitignored personal statements) and skips when it's absent.
 
 ## Writing a new test
 
-Follow `moey.test.ts` — it's the reference for parser tests.
+Parser tests are in the Dart package now (`mobile_app/packages/statement_parser/test/`). A new
+layout case goes in `fixtures/parsers/` as `<name>.pdfjs.txt` and/or `<name>.pdfium.txt` plus
+`<name>.expected.json`, synthetic only: never paste a real statement, since these carry real
+names, addresses, IBANs and account numbers.
 
-1. **Fixtures are inline synthetic strings**, built as an array of lines joined with `\n`.
-   Never paste a real statement into a fixture: these are bank statements with real names,
-   addresses, IBANs and account numbers. Invent the names and amounts, but *do* faithfully
-   reproduce the layout quirks `pdf-parse` produces — glued columns, wrapped descriptions, a
-   page header landing mid-movement, amount and balance on their own line.
-2. **Feed the parser object directly** — `moeyParser.canParse(TEXT)` and
-   `await moeyParser.parse(TEXT)`. Don't go through `processStatement()`; you'd need a real PDF.
-   The `await` is needed because `BankParser.parse` is typed sync-or-`Promise`.
-3. **Assert over the whole list at once** with one `assert.deepEqual`, projecting away
-   `rawLine`:
-
-   ```ts
-   assert.deepEqual(
-     txs.map(({ date, payee, amountCents }) => ({ date, payee, amountCents })),
-     [{ date: '2026-07-01', payee: 'MERCADO TESTE', amountCents: -260 }, /* … */],
-   );
-   ```
-
-4. **Test `canParse` both ways** — it must accept its own bank and reject the others. Parser
-   dispatch is first-match-wins over `REGEX_PARSERS` (`src/index.ts`), so a sloppy sniff
-   silently hijacks another bank's statements.
-5. **Give each regression its own `test()`** with a short comment explaining the historical bug.
+Backend tests use Node's `node:test` with `node:assert/strict`; assert over a whole list at once
+with one `assert.deepEqual`, and give each regression its own `test()` with a short comment.
 
 ### Binary fixtures
 
@@ -143,9 +116,10 @@ only.
 
 ### 2. Parse a statement
 
-`POST /parse` extracts and returns transactions **without touching Actual** — no budget, no
-reachable Actual server, no `ACTUAL_*` config needed. This is the fastest way to test a parser
-against a real PDF.
+`POST /parse` reads a statement with the AI provider and returns transactions **without
+touching Actual** — no budget, no reachable Actual server, no `ACTUAL_*` config needed. It needs
+`AI_PROVIDER` and its API key; without them it answers `AI_NOT_CONFIGURED`. (The bank parsers run
+on the phone; the Dart package's tests cover them.)
 
 ```bash
 curl -X POST http://localhost:3000/parse \
@@ -160,11 +134,11 @@ Useful response codes:
 | Code | Means |
 | --- | --- |
 | `MISSING_FIELD` | No file, or the field wasn't called `statement` / `statements` |
-| `BANK_UNRECOGNIZED` | No parser's `canParse` matched |
-| `NO_TRANSACTIONS` | A parser claimed the statement but extracted zero rows — the layout changed |
+| `AI_NOT_CONFIGURED` | The backend has no AI key, so it doesn't read statements |
+| `NO_TRANSACTIONS` | The AI provider found no rows |
 | `PDF_PASSWORD_REQUIRED` / `PDF_PASSWORD_INCORRECT` | Encrypted PDF |
 | `PDF_UNREADABLE` | Not a PDF, or corrupt |
-| `TOO_MANY_FILES` | More than 20 files to `/parse`, or more than 1 to the legacy `/import` |
+| `TOO_MANY_FILES` | More than 20 files to `/parse` |
 | `FILE_TOO_LARGE` | One file is over the 20MB per-file limit |
 | `BATCH_TOO_LARGE` | Every file is under 20MB, but the request is over 50MB in total |
 
@@ -199,14 +173,13 @@ Things to check when testing it:
 - **Partial success returns 200.** One bad file must not cost the others, so per-file failures are
   data (`status` + `code`), not an HTTP error. Only a request-level problem — no files, too many,
   too large, wrong field name — is a 4xx.
-- **Mixed banks in one request work.** Each file is identified independently.
 - **`importedId`s must be identical to parsing the same file alone.** This is the one thing that
   can silently corrupt a budget: ids are stamped per *statement*, so a movement appearing in two
   overlapping exports keeps one id and Actual dedupes it. Stamping across the batch instead would
   give it two ids and import it twice. Verify by diffing a file's ids in a multi-file response against the same file sent alone.
 - **One `password` applies to every file.** Statements needing a different one come back as
   `PDF_PASSWORD_REQUIRED`/`INCORRECT`; re-send those alone with their own password.
-- Parsing is sequential on purpose — in `PARSER_MODE=ai` each file is a provider call.
+- Parsing is sequential on purpose — each file is an AI provider call.
 
 `POST /import/confirm` needs no changes to accept a batch: concatenate the reviewed transactions
 from every file into one `transactions` array. Ids already on the rows are preserved.
@@ -215,6 +188,9 @@ Real statements live in `Docs/tests/` and are **gitignored** — they're persona
 they stay out of the repo and out of fixtures.
 
 ### 3. Verify the parse result by balance reconciliation
+
+This applies to the phone's parsers (the Dart package's `real_statements_test.dart` checks the
+real statements in `Docs/tests/`) and to an AI result from `/parse`.
 
 A parser can return plausible-looking rows that are quietly wrong — most often the **sign**,
 since the Portuguese statements here carry direction in a separate column, a marker glued to
@@ -252,9 +228,6 @@ dedupe when the same statement is re-imported.
 
 Re-running the same import is the test that matters: the second run must add **zero**
 transactions. If it adds duplicates, dedupe is broken.
-
-`POST /import` (multipart, parse + import in one call) is legacy and skips the review step.
-Don't test new work through it.
 
 ## Mobile app
 

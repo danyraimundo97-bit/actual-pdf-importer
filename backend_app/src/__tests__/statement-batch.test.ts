@@ -74,7 +74,7 @@ test('a typed ImporterError keeps its own code and message', async () => {
 });
 
 test('files are parsed in order, one at a time', async () => {
-  // Sequential on purpose: in PARSER_MODE=ai each file is a provider call.
+  // Sequential on purpose: each file is an AI provider call.
   const started: string[] = [];
   let inFlight = 0;
   const results = await parseStatements([file('1'), file('2'), file('3')], async (buffer) => {
