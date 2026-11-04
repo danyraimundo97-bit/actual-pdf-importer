@@ -7,6 +7,7 @@ class SettingsStore {
   static const _kBudgetSyncId = 'budget_sync_id';
   static const _kBudgetName = 'budget_name';
   static const _kLastAccountId = 'last_account_id';
+  static const _kLastLedgerAccountPrefix = 'last_ledger_account.';
   static const _kOnboarded = 'onboarded';
   static const _kDebugLogging = 'debug_logging';
   static const _kParseOnDevice = 'parse_on_device';
@@ -30,6 +31,11 @@ class SettingsStore {
 
   String? get lastAccountId => _prefs.getString(_kLastAccountId);
   Future<void> setLastAccountId(String id) => _prefs.setString(_kLastAccountId, id);
+
+  /// The phone account a statement from [bankId] was last saved into.
+  String? lastLedgerAccountFor(String bankId) => _prefs.getString('$_kLastLedgerAccountPrefix$bankId');
+  Future<void> setLastLedgerAccountFor(String bankId, String accountId) =>
+      _prefs.setString('$_kLastLedgerAccountPrefix$bankId', accountId);
 
   /// Null for installs from before the setup guide existed; AppConfig
   /// derives a value from the connection settings in that case.

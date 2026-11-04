@@ -7,12 +7,20 @@ class ImportResult {
   /// deletes. Empty from a backend too old to report them.
   final List<String> addedIds;
 
+  /// Set when the statement was saved on the phone (the local ledger)
+  /// instead of imported into Actual: the account it went into. [updated]
+  /// then counts lines already on the phone, and [addedIds] are ledger ids.
+  final ({String id, String name})? phoneAccount;
+
   const ImportResult({
     required this.added,
     required this.updated,
     required this.categorized,
     this.addedIds = const [],
+    this.phoneAccount,
   });
+
+  bool get onPhone => phoneAccount != null;
 
   factory ImportResult.fromJson(Map<String, dynamic> json) {
     return ImportResult(

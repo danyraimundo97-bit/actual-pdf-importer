@@ -10,7 +10,9 @@ import '../../../data/providers.dart';
 import '../../../shared/widgets/inline_note.dart';
 import '../../../shared/widgets/sheet_body.dart';
 
-/// Shown after a successful import. Also offers to write back every
+/// Shown after a successful import, or a statement saved on the phone
+/// ([ImportResult.onPhone]; categories are remembered there by Review
+/// itself, so [editedPayees] is empty). After an import it also offers to write back every
 /// payee the user re-categorized during review, closing the learning loop
 /// immediately instead of relying on a later "learn from Actual" pass.
 class ImportResultSheet extends ConsumerStatefulWidget {
@@ -66,7 +68,7 @@ class _ImportResultSheetState extends ConsumerState<ImportResultSheet> {
     final r = widget.result;
     final changed = widget.editedPayees.length;
     return SheetBody(
-      title: 'Import complete',
+      title: r.onPhone ? 'Saved on this phone' : 'Import complete',
       actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))],
       children: [
         Row(
@@ -76,7 +78,7 @@ class _ImportResultSheetState extends ConsumerState<ImportResultSheet> {
               child: _Stat(value: r.added, label: 'Added'),
             ),
             Expanded(
-              child: _Stat(value: r.updated, label: 'Already in Actual'),
+              child: _Stat(value: r.updated, label: r.onPhone ? 'Already on the phone' : 'Already in Actual'),
             ),
             Expanded(
               child: _Stat(value: r.categorized, label: 'Categorized'),

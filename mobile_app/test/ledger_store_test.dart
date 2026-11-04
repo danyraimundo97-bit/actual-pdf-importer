@@ -139,6 +139,50 @@ void main() {
     });
   });
 
+  group('statements', () {
+    test('lines on or before the opening balance were already in it', () async {
+      // Added on 4 November with 1.000,00 "today", then October's statement
+      // is saved: the balance on 4 November stays 1.000,00.
+      final id = await store.createAccount(phoneScope, name: 'Checking', openingBalanceCents: 100000);
+      final saved = await store.addStatement(id, [
+        draft('2026-10-01', -2000, importedId: 'pdfimport-a'),
+        draft('2026-10-15', 50000, importedId: 'pdfimport-b'),
+        draft('2026-11-05', -1000, importedId: 'pdfimport-c'),
+      ]);
+      expect(saved.added, 3);
+      expect(await store.openingBalance(id), 100000 - 48000);
+      final [view] = await accounts();
+      expect(view.balanceCents, 100000 - 1000);
+      final opening = (await store.transactions(id)).singleWhere((t) => t.startingBalance);
+      expect(opening.date, '2026-09-30');
+
+      // Saving it again changes nothing.
+      final again = await store.addStatement(id, [draft('2026-10-01', -2000, importedId: 'pdfimport-a')]);
+      expect((again.added, again.skipped), (0, 1));
+      expect(await store.openingBalance(id), 52000);
+    });
+
+    test('without an opening balance the lines are simply added', () async {
+      final id = await store.createAccount(phoneScope, name: 'Card');
+      await store.addStatement(id, [draft('2026-10-01', -2000, importedId: 'pdfimport-a')]);
+      final [view] = await accounts();
+      expect(view.balanceCents, -2000);
+      expect(await store.openingBalance(id), 0);
+    });
+
+    test('removing a saved statement skips rows already removed', () async {
+      final id = await store.createAccount(phoneScope, name: 'Checking');
+      final saved = await store.addStatement(id, [
+        draft('2026-10-01', -2000, importedId: 'pdfimport-a'),
+        draft('2026-10-02', -500, importedId: 'pdfimport-b'),
+      ]);
+      await store.deleteTransaction(saved.ids.first);
+      final outcome = await store.deleteTransactions([...saved.ids, 'tx:unknown']);
+      expect((outcome.removed, outcome.skipped), (1, 2));
+      expect(await store.transactions(id), isEmpty);
+    });
+  });
+
   group('budget amounts', () {
     test('set, overwrite and copy from last month', () async {
       await store.setBudget(phoneScope, 'preset:groceries', '2026-10', 30000);

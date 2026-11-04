@@ -20,6 +20,10 @@ class ImportHistoryEntry {
   final String? budgetSyncId;
   final List<String> addedIds;
 
+  /// Saved into the phone's own ledger, not imported into Actual: undoing
+  /// removes the ledger rows.
+  final bool onPhone;
+
   /// Set once the import was undone; the entry stays, marked as such.
   final DateTime? undoneAt;
 
@@ -33,6 +37,7 @@ class ImportHistoryEntry {
     this.accountId,
     this.budgetSyncId,
     this.addedIds = const [],
+    this.onPhone = false,
     this.undoneAt,
   });
 
@@ -48,6 +53,7 @@ class ImportHistoryEntry {
     accountId: accountId,
     budgetSyncId: budgetSyncId,
     addedIds: addedIds,
+    onPhone: onPhone,
     undoneAt: when,
   );
 
@@ -61,6 +67,7 @@ class ImportHistoryEntry {
     if (accountId != null) 'accountId': accountId,
     if (budgetSyncId != null) 'budgetSyncId': budgetSyncId,
     'addedIds': addedIds,
+    if (onPhone) 'onPhone': true,
     if (undoneAt != null) 'undoneAt': undoneAt!.toIso8601String(),
   };
 
@@ -74,6 +81,7 @@ class ImportHistoryEntry {
     accountId: json['accountId'] as String?,
     budgetSyncId: json['budgetSyncId'] as String?,
     addedIds: (json['addedIds'] as List?)?.cast<String>() ?? const [],
+    onPhone: json['onPhone'] as bool? ?? false,
     undoneAt: json['undoneAt'] == null ? null : DateTime.parse(json['undoneAt'] as String),
   );
 }

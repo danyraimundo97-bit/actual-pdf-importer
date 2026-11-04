@@ -286,6 +286,34 @@ class LedgerStore {
     });
   }
 
+  /// Saves a reviewed statement ([addTransactions]) keeping the account's
+  /// opening balance true. That balance is what the account held on its
+  /// date ("Balance today" when the account was added), so statement lines
+  /// on or before that date were already in it: the opening balance gives
+  /// them back and moves to the day before the earliest one. The balance on
+  /// the opening date stays what the user said.
+  Future<({int added, int skipped, List<String> ids})> addStatement(String accountId, List<LedgerDraft> drafts) {
+    return _db.transaction(() async {
+      final opening = await _openingBalanceRow(accountId);
+      final saved = await addTransactions(accountId, drafts);
+      if (opening == null || saved.ids.isEmpty) return saved;
+      final earlier = await (_db.select(
+        _db.ledgerTransactions,
+      )..where((t) => t.id.isIn(saved.ids) & t.date.isSmallerOrEqualValue(opening.date))).get();
+      if (earlier.isEmpty) return saved;
+      final earliest = DateTime.parse(earlier.map((t) => t.date).reduce((a, b) => a.compareTo(b) <= 0 ? a : b));
+      await (_db.update(_db.ledgerTransactions)..where((t) => t.id.equals(opening.id))).write(
+        LedgerTransactionsCompanion(
+          amountCents: Value(opening.amountCents - earlier.fold(0, (sum, t) => sum + t.amountCents)),
+          date: Value(ledgerDate(DateTime(earliest.year, earliest.month, earliest.day - 1))),
+          updatedAt: Value(_at),
+        ),
+      );
+      await _queue(opening.scope, 'transaction', opening.id);
+      return saved;
+    });
+  }
+
   /// Changes a transaction's fields; `importedId` never changes (it's the
   /// dedupe key, see CLAUDE.md). Pass [clearCategory] to remove the category.
   Future<void> updateTransaction(
@@ -329,6 +357,21 @@ class LedgerStore {
       final tx = await transaction(id);
       if (tx == null || tx.deleted) return;
       await _tombstone(tx);
+    });
+  }
+
+  /// Removes several transactions (undoing a saved statement). Returns how
+  /// many were removed; ones already removed or unknown are skipped.
+  Future<({int removed, int skipped})> deleteTransactions(List<String> ids) {
+    return _db.transaction(() async {
+      var removed = 0;
+      for (final id in ids) {
+        final tx = await transaction(id);
+        if (tx == null || tx.deleted) continue;
+        await _tombstone(tx);
+        removed++;
+      }
+      return (removed: removed, skipped: ids.length - removed);
     });
   }
 

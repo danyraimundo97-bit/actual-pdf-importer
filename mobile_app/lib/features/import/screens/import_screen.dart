@@ -166,9 +166,9 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
   }
 
   Future<void> _review(InboxItem item) async {
-    // No account (Actual not connected, no backend): Review still opens,
-    // for CSV export.
-    final account = _selectedAccount;
+    // Without Actual, Review saves into one of the phone's own accounts,
+    // chosen there (docs/plans/local-ledger.md, Phase 3).
+    final account = _actualMissing ? null : _selectedAccount;
     final parsed = item.parseResult;
     if (parsed == null) return;
     final config = ref.read(appConfigProvider);
@@ -178,26 +178,36 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         parseResult: parsed,
         account: account,
         budgetSyncId: config.budgetSyncId,
+        saveOnPhone: _actualMissing,
       ),
     );
-    if (result == null || account == null) return;
+    if (result == null) return;
+    final phone = result.phoneAccount;
+    final (accountId, accountName) = switch ((phone, account)) {
+      (final p?, _) => (p.id, p.name),
+      (null, final a?) => (a.id, a.name),
+      (null, null) => (null, null),
+    };
+    if (accountId == null || accountName == null) return;
     ref.read(inboxProvider.notifier).markImported(item.id, result);
-    await ref.read(settingsStoreProvider).setLastAccountId(account.id);
+    if (phone == null) await ref.read(settingsStoreProvider).setLastAccountId(accountId);
     await ref
         .read(importHistoryProvider.notifier)
         .add(
           ImportHistoryEntry(
             filename: item.filename,
             bankId: parsed.bankId,
-            accountName: account.name,
+            accountName: accountName,
             added: result.added,
             updated: result.updated,
             at: DateTime.now(),
-            accountId: account.id,
-            budgetSyncId: config.budgetSyncId,
+            accountId: accountId,
+            budgetSyncId: phone == null ? config.budgetSyncId : null,
             addedIds: result.addedIds,
+            onPhone: phone != null,
           ),
         );
+    if (phone != null) return;
     ref.invalidate(dashboardProvider);
     // The import remembered each payee's category on the backend.
     ref.read(categoryMemoryRevisionProvider.notifier).state++;
@@ -214,10 +224,14 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Remove this import?'),
         content: Text(
-          'The $count $noun that "${entry.filename}" added to ${entry.accountName} will be set to '
-          '0.00 in Actual, with a note saying they were removed by this app. Nothing is deleted, '
-          'and transactions that were already there before are not touched.\n\n'
-          'Importing the same statement again will not bring them back.',
+          entry.onPhone
+              ? 'The $count $noun that "${entry.filename}" added to ${entry.accountName} on this phone '
+                    'will be removed. Transactions that were already there before are not touched.\n\n'
+                    'Saving the same statement again will not bring them back.'
+              : 'The $count $noun that "${entry.filename}" added to ${entry.accountName} will be set to '
+                    '0.00 in Actual, with a note saying they were removed by this app. Nothing is deleted, '
+                    'and transactions that were already there before are not touched.\n\n'
+                    'Importing the same statement again will not bring them back.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -233,6 +247,19 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       ),
     );
     if (confirmed != true) return;
+    if (entry.onPhone) {
+      final outcome = await ref.read(ledgerStoreProvider).deleteTransactions(entry.addedIds);
+      _log.info('Saved statement removed', {
+        'accountId': entry.accountId,
+        'removed': outcome.removed,
+        'skipped': outcome.skipped,
+      });
+      await ref.read(importHistoryProvider.notifier).markUndone(entry);
+      if (!mounted) return;
+      final skipped = outcome.skipped == 0 ? '' : ' ${outcome.skipped} were already removed.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed ${outcome.removed} $noun.$skipped')));
+      return;
+    }
     try {
       final outcome = await ref
           .read(importerApiProvider)
@@ -368,14 +395,24 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const InlineNote(
-            message: 'Connect Actual to import: statements are read and reviewed here, '
-                'then go into one of your Actual accounts.',
+            message: "Statements are saved into your accounts on this phone. You choose the account "
+                "when you review one. Connect Actual to import them there too.",
           ),
           const SizedBox(height: Space.xs),
-          TextButton.icon(
-            onPressed: () => context.go('/settings'),
-            icon: const Icon(Icons.link_rounded, size: 18),
-            label: const Text('Connect Actual'),
+          Wrap(
+            spacing: Space.sm,
+            children: [
+              TextButton.icon(
+                onPressed: () => context.push('/settings/accounts'),
+                icon: const Icon(Icons.account_balance_outlined, size: 18),
+                label: const Text('Accounts'),
+              ),
+              TextButton.icon(
+                onPressed: () => context.go('/settings'),
+                icon: const Icon(Icons.link_rounded, size: 18),
+                label: const Text('Connect Actual'),
+              ),
+            ],
           ),
         ],
       );
@@ -548,7 +585,9 @@ class _InboxTile extends StatelessWidget {
       ),
       InboxStatus.imported => (
         Icon(Icons.check_circle_rounded, color: context.tokens.inflow),
-        'Imported: ${imported?.added ?? 0} added, ${imported?.updated ?? 0} already in Actual',
+        imported?.onPhone ?? false
+            ? 'Saved: ${imported!.added} added, ${imported.updated} already on the phone'
+            : 'Imported: ${imported?.added ?? 0} added, ${imported?.updated ?? 0} already in Actual',
         colors.onSurfaceVariant,
       ),
       InboxStatus.failed => (

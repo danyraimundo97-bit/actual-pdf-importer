@@ -282,6 +282,45 @@ for all three.
 - Removing an import (undo) becomes deleting its rows in the ledger. The sync turns that into
   `/import/undo`'s soft delete in Actual.
 
+### Phase 3 as built (2026-11-04)
+
+- **Only the "no Actual" side is built here.** With Actual connected, Review still imports straight
+  into Actual as before. Saving those lines into the ledger as well needs Actual's accounts in the
+  ledger, and those arrive with the sync (Phase 5). That phase switches Import over to the ledger.
+- **Review** (`ReviewScreenArgs.saveOnPhone`, set by the Import tab while Actual isn't connected):
+  - a "Save into" picker under the header lists the phone's open accounts, with "New account…"
+    (the account sheet from Phase 2, which also records the statement's bank on the new account);
+  - the suggestion is `suggestLedgerAccount` (`features/review/phone_save.dart`): the account that
+    bank's statements last went into (`SettingsStore.lastLedgerAccountFor`), else an account set up
+    for that bank (`bankId`), else the only account. With a real choice it suggests nothing, so a
+    statement never lands in the wrong account unseen;
+  - **Save N transactions** (no confirmation dialog: it can be removed from Recent imports). CSV
+    export moved to the app bar. The CSV-only screen stays for the one case with neither: Actual
+    connected but no account to import into;
+  - it remembers categories on the phone as the CSV path did, then shows the result sheet ("Saved on
+    this phone": added, already on the phone, categorized) and pops with an `ImportResult` whose
+    `phoneAccount` is set.
+- **`LedgerStore.addStatement`** keeps the opening balance true. That balance is what the account
+  held on its date ("Balance today" when it was added), so lines on or before that date were already
+  in it. The opening balance gives them back and moves to the day before the earliest one. Example:
+  an account is added on 4 November with 1.000,00, and October's statement is saved afterwards. The
+  balance on 4 November is still 1.000,00.
+- **Import tab:**
+  - with Actual missing, the Account field explains that statements go into the phone's accounts,
+    with links to Settings › Accounts and to connecting Actual;
+  - a saved statement shows "Saved: N added, M already on the phone";
+  - Recent imports keeps it with `onPhone`. Removing it tombstones its rows
+    (`LedgerStore.deleteTransactions`), and saving the statement again doesn't bring them back, as in
+    Actual.
+- Logs: account ids and counts only.
+- Tests:
+  - `ledger_store_test.dart` (+3): the opening balance kept through a statement, no opening balance,
+    removing a saved statement;
+  - `review_save_on_phone_test.dart` (6): the suggestion rules, drafts keeping `importedId`, the
+    history entry's `onPhone`, saving into the only account and then the same statement again,
+    adding an account from the picker.
+  - 155 pass, 1 skipped. The analyzer shows the same 15 notes as before.
+
 ## Phase 4: Home, Budget and the account screen from the ledger
 
 - Pure builders, ported and tested the same way as the backend's:

@@ -11,5 +11,10 @@ class ReviewScreenArgs {
   final ActualAccount? account;
   final String? budgetSyncId;
 
-  const ReviewScreenArgs({required this.parseResult, this.account, this.budgetSyncId});
+  /// Actual isn't connected: Review saves into one of the phone's own
+  /// accounts (the local ledger), chosen there, instead of offering only
+  /// CSV export.
+  final bool saveOnPhone;
+
+  const ReviewScreenArgs({required this.parseResult, this.account, this.budgetSyncId, this.saveOnPhone = false});
 }

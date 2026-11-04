@@ -8,16 +8,24 @@ import '../../../core/format/banks.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local/db/app_database.dart';
 import '../../../data/local/db/local_category_store.dart';
+import '../../../data/local/ledger_store.dart';
 import '../../../data/models/actual_category.dart';
+import '../../../data/models/import_result.dart';
 import '../../../data/models/parsed_transaction.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/inline_note.dart';
+import '../../../shared/widgets/labeled_field.dart';
+import '../../../shared/widgets/skeleton.dart';
+import '../../accounts/widgets/account_sheet.dart';
 import '../../categories/category_matching.dart';
 import '../csv_export.dart';
+import '../phone_save.dart';
 import '../widgets/import_result_sheet.dart';
+import '../widgets/save_into_sheet.dart';
 import '../widgets/transaction_edit_sheet.dart';
 import '../widgets/transaction_row.dart';
 import 'review_screen_args.dart';
@@ -40,6 +48,12 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
   bool _importing = false;
   final Set<String> _editedPayees = {};
 
+  /// Saving into the phone's own accounts (Actual not connected).
+  bool get _onPhone => widget.args.saveOnPhone && widget.args.account == null;
+  List<LedgerAccount> _ledgerAccounts = const [];
+  LedgerAccount? _ledgerAccount;
+  bool _ledgerLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -51,7 +65,104 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     _transactions = widget.args.account != null && parsed.localCategories
         ? [for (final t in parsed.transactions) t.withoutSuggestion()]
         : List.of(parsed.transactions);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCategories());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCategories();
+      if (_onPhone) _loadLedgerAccounts();
+    });
+  }
+
+  /// The phone's open accounts, with the suggested one chosen ([select]
+  /// wins, for an account just added here).
+  Future<void> _loadLedgerAccounts({String? select}) async {
+    final views = await ref.read(ledgerStoreProvider).watchAccounts(phoneScope).first;
+    final open = [
+      for (final v in views)
+        if (!v.account.closed) v.account,
+    ];
+    final bankId = widget.args.parseResult.bankId;
+    final lastUsed = select ?? ref.read(settingsStoreProvider).lastLedgerAccountFor(bankId);
+    if (!mounted) return;
+    setState(() {
+      _ledgerAccounts = open;
+      _ledgerAccount = suggestLedgerAccount(open, bankId: bankId, lastUsedId: lastUsed);
+      _ledgerLoaded = true;
+    });
+  }
+
+  Future<void> _chooseLedgerAccount() async {
+    final chosen = await showModalBottomSheet<Object>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SaveIntoSheet(accounts: _ledgerAccounts, selected: _ledgerAccount),
+    );
+    if (!mounted) return;
+    if (chosen is LedgerAccount) {
+      setState(() => _ledgerAccount = chosen);
+    } else if (chosen == SaveIntoSheet.newAccount) {
+      final edit = await showAccountSheet(context);
+      if (edit == null) return;
+      final id = await ref
+          .read(ledgerStoreProvider)
+          .createAccount(
+            phoneScope,
+            name: edit.name,
+            offBudget: edit.offBudget,
+            openingBalanceCents: edit.balanceCents,
+            bankId: widget.args.parseResult.bankId,
+          );
+      _log.info('Account added', {'account': id});
+      await _loadLedgerAccounts(select: id);
+    }
+  }
+
+  /// Saves the selected lines into the chosen phone account. Lines the
+  /// account already has (same importedId) are skipped, so saving a
+  /// statement twice adds nothing.
+  Future<void> _saveOnPhone() async {
+    final account = _ledgerAccount;
+    final included = _transactions.where((t) => t.include).toList();
+    if (account == null || included.isEmpty) return;
+    setState(() => _importing = true);
+    try {
+      final store = ref.read(ledgerStoreProvider);
+      final bankId = widget.args.parseResult.bankId;
+      final saved = await store.addStatement(account.id, statementDrafts(included));
+      if (account.bankId == null) await store.updateAccount(account.id, bankId: bankId);
+      await ref.read(settingsStoreProvider).setLastLedgerAccountFor(bankId, account.id);
+      await _rememberLocally(included);
+      var categorized = 0;
+      for (final id in saved.ids) {
+        if ((await store.transaction(id))?.categoryId != null) categorized++;
+      }
+      _log.info('Statement saved on the phone', {
+        'account': account.id,
+        'added': saved.added,
+        'skipped': saved.skipped,
+      });
+      final result = ImportResult(
+        added: saved.added,
+        updated: saved.skipped,
+        categorized: categorized,
+        addedIds: saved.ids,
+        phoneAccount: (id: account.id, name: account.name),
+      );
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) => ImportResultSheet(result: result, editedPayees: const [], transactions: _transactions),
+      );
+      if (mounted) context.pop(result);
+    } catch (e, stack) {
+      _log.error('Saving the statement on the phone failed', e, stack, {'account': account.id});
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not save the transactions on this phone.')));
+      }
+    } finally {
+      if (mounted) setState(() => _importing = false);
+    }
   }
 
   Future<void> _loadCategories() async {
@@ -265,7 +376,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       appBar: AppBar(
         title: const Text('Review'),
         actions: [
-          if (canImport)
+          if (canImport || _onPhone)
             IconButton(
               tooltip: 'Export CSV',
               icon: const Icon(Icons.ios_share_rounded),
@@ -285,6 +396,23 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
               categorizedCount: _categorizedCount,
             ),
           ),
+          if (_onPhone)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(Space.gutter, 0, Space.gutter, Space.lg),
+                child: LabeledField(
+                  label: 'Save into',
+                  child: _ledgerLoaded
+                      ? PickerField(
+                          leadingIcon: Icons.account_balance_outlined,
+                          value: _ledgerAccount?.name ?? 'Choose an account',
+                          isPlaceholder: _ledgerAccount == null,
+                          onTap: _chooseLedgerAccount,
+                        )
+                      : const Skeleton(height: 52, radius: Radii.control),
+                ),
+              ),
+            ),
           SliverList.builder(
             itemCount: entries.length,
             itemBuilder: (context, i) {
@@ -310,7 +438,17 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
           top: false,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(Space.gutter, Space.md, Space.gutter, Space.lg),
-            child: canImport
+            child: _onPhone
+                ? BusyButton(
+                    label: switch ((count, _ledgerAccount)) {
+                      (0, _) => 'Nothing selected',
+                      (_, null) => 'Choose an account to save into',
+                      _ => 'Save $count transaction${count == 1 ? '' : 's'}',
+                    },
+                    busy: _importing,
+                    onPressed: count > 0 && _ledgerAccount != null ? _saveOnPhone : null,
+                  )
+                : canImport
                 ? BusyButton(
                     label: count == 0 ? 'Nothing selected' : 'Import $count transaction${count == 1 ? '' : 's'}',
                     busy: _importing,
