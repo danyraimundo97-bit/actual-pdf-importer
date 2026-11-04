@@ -229,6 +229,48 @@ for all three.
 - Tests: migration 2 → 3, dedupe on `importedId`, tombstones, and an outbox entry written with every
   change.
 
+### Phase 2 as built (2026-11-04)
+
+- **Tables** (`lib/data/local/db/ledger_tables.dart`, schema 3, migrated with `createTable` from 2):
+  - `LedgerAccounts`, `LedgerPayees`, `LedgerTransactions`, `LedgerBudgets`, `LedgerOutbox`,
+    `LedgerSyncState`, as in the data model.
+  - `LedgerTransactions` has a unique `(accountId, importedId)` and indexes on `(accountId, date)`
+    and `(scope, date)`. `categoryId` has no foreign key, because an Actual category can arrive after
+    its transactions.
+- **`LedgerStore`** (`lib/data/local/ledger_store.dart`):
+  - accounts: create with an opening balance, update, reorder, close, set or remove the opening
+    balance;
+  - payees: found by name, ignoring case, or created;
+  - transactions:
+    - added one at a time or as a statement batch, skipping importedIds the account already has
+      (removed ones included, as in Actual);
+    - edited without ever touching `importedId`;
+    - removed as a tombstone;
+    - transfers and splits refuse edits on the phone;
+  - budget amounts: set, read a month, copy last month.
+  - Every write queues its row in `LedgerOutbox` in the same database transaction. There's one entry
+    per row: a second change keeps its place, and a removal turns it into a `delete`.
+  - `watchAccounts` gives live balances: the sum of each account's live top-level rows, so the
+    opening balance is included.
+- **Settings › Accounts** (`features/accounts/screens/accounts_settings_screen.dart`, sheet in
+  `widgets/account_sheet.dart`):
+  - open accounts, then a "Closed" group, each with its balance;
+  - one sheet for the name, the balance (today's for a new account, the opening one when editing; a
+    minus is money owed), "Off budget", and Close/Reopen.
+  - The Settings overview shows the row while Actual isn't connected, with the number of accounts.
+- `parseAmountInput` moved to `core/format/money.dart` (quick add re-exports it), next to the new
+  `parseSignedAmountInput` and `centsToInput`.
+- Logs carry account ids only: no names or amounts.
+- Tests:
+  - `ledger_store_test.dart` (13): balances and order, opening balances, scopes, the same statement
+    twice, a removed row still counting as imported, payees by name, edits keeping `importedId`,
+    budget amounts, the outbox order and ops, and the 2 → 3 migration;
+  - `accounts_settings_test.dart` (4): adding from the empty state, validation, editing the opening
+    balance and closing.
+  - The Settings tests now give the accounts provider a fixed list, because a drift stream never
+    settles in a widget test.
+  - 146 pass, 1 skipped. The analyzer shows the same 15 notes as before.
+
 ## Phase 3: Save reviewed statements on the phone
 
 - Review always saves to the ledger: **Save** (no Actual), or **Import** (Actual connected: saved to

@@ -11,6 +11,7 @@ import 'local/db/database_opening.dart';
 import 'local/db/local_category_store.dart';
 import 'local/db/open_connection.dart';
 import 'local/import_history_store.dart';
+import 'local/ledger_store.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
 import 'models/backend_config.dart';
@@ -150,6 +151,15 @@ final databaseWasResetProvider = StateProvider<bool>((ref) => ref.watch(settings
 
 final localCategoryStoreProvider = Provider<LocalCategoryStore>((ref) {
   return LocalCategoryStore(ref.watch(appDatabaseProvider));
+});
+
+/// The local ledger (docs/plans/local-ledger.md).
+final ledgerStoreProvider = Provider<LedgerStore>((ref) => LedgerStore(ref.watch(appDatabaseProvider)));
+
+/// The phone's own accounts with their balances, live. (The scope of a
+/// budget synced with Actual comes with Phase 5.)
+final ledgerAccountsProvider = StreamProvider.autoDispose<List<LedgerAccountView>>((ref) {
+  return ref.watch(ledgerStoreProvider).watchAccounts(phoneScope);
 });
 
 /// On-device PDF reading (docs/plans/dart-parser.md, Phase 3). Tests

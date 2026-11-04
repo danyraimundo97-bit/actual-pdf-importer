@@ -3,37 +3,14 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
+import '../../core/format/money.dart';
 import '../../core/log/app_log.dart';
 import '../../data/models/quick_add.dart';
 import '../../data/providers.dart';
 
-const _log = AppLog('quick-add');
+export '../../core/format/money.dart' show parseAmountInput;
 
-/// "4,50", "4.50", "1.234,56", "1,234.56", "12" → cents; null if it isn't
-/// a positive amount. The sign comes from the expense/income toggle, so a
-/// typed minus is ignored.
-int? parseAmountInput(String input) {
-  var text = input.trim().replaceAll(RegExp(r'[\s€+\-−]'), '');
-  if (text.isEmpty) return null;
-  final lastComma = text.lastIndexOf(',');
-  final lastDot = text.lastIndexOf('.');
-  // Whichever separator comes last is the decimal one, if it has 1-2
-  // digits after it; the other is a thousands separator.
-  final decimalAt = max(lastComma, lastDot);
-  String whole = text;
-  String fraction = '';
-  if (decimalAt >= 0 && text.length - decimalAt - 1 <= 2) {
-    whole = text.substring(0, decimalAt);
-    fraction = text.substring(decimalAt + 1);
-  }
-  // Separators left in the whole part must group thousands: "1.234", not "4,5".
-  if (whole.contains(RegExp(r'[.,]')) && !RegExp(r'^\d{1,3}([.,]\d{3})+$').hasMatch(whole)) return null;
-  whole = whole.replaceAll(RegExp(r'[.,]'), '');
-  if (!RegExp(r'^\d*$').hasMatch(whole) || !RegExp(r'^\d{0,2}$').hasMatch(fraction)) return null;
-  if (whole.isEmpty && fraction.isEmpty) return null;
-  final cents = int.parse(whole.isEmpty ? '0' : whole) * 100 + int.parse(fraction.padRight(2, '0'));
-  return cents > 0 ? cents : null;
-}
+const _log = AppLog('quick-add');
 
 final _random = Random.secure();
 

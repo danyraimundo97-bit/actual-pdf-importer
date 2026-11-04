@@ -75,6 +75,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final ready = ref.watch(linkStateProvider).valueOrNull == LinkState.ready;
     final pending = ready ? ref.watch(pendingCategoryMatchesProvider).valueOrNull ?? 0 : 0;
     final hasBackend = config.backendUrl?.isNotEmpty == true;
+    final ledgerAccounts = ready ? null : ref.watch(ledgerAccountsProvider).valueOrNull;
     final backend = backendStatus(config, check);
     final actual = actualStatus(config, check);
 
@@ -117,6 +118,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ],
           ),
+          if (!ready) ...[
+            const SizedBox(height: Space.xl),
+            // The phone's own accounts (docs/plans/local-ledger.md), until
+            // the sync with Actual brings Actual's (Phase 5).
+            SettingsGroup(
+              children: [
+                SettingsRow(
+                  icon: Icons.account_balance_outlined,
+                  title: 'Accounts',
+                  subtitle: Text(switch (ledgerAccounts?.where((v) => !v.account.closed).length) {
+                    null || 0 => 'Kept on this phone',
+                    1 => '1 account on this phone',
+                    final n => '$n accounts on this phone',
+                  }),
+                  onTap: () => context.push('/settings/accounts'),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: Space.xl),
           SettingsGroup(
             label: 'Categories',

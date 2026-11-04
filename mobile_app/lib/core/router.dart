@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../data/providers.dart';
 import 'log/error_hooks.dart';
+import '../features/accounts/screens/accounts_settings_screen.dart';
 import '../features/accounts/screens/account_screen.dart';
 import '../features/backups/screens/backups_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
@@ -115,6 +116,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'actual',
                     parentNavigatorKey: _rootNavigatorKey,
                     builder: (context, state) => const ActualSettingsScreen(),
+                  ),
+                  GoRoute(
+                    path: 'accounts',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const AccountsSettingsScreen(),
                   ),
                   GoRoute(
                     path: 'categories',

@@ -191,6 +191,9 @@ void main() {
             importerApiProvider.overrideWithValue(api),
             secretStoreProvider.overrideWithValue(secrets),
             appDatabaseProvider.overrideWithValue(db),
+            // The phone's accounts are a drift stream, which never settles in
+            // a widget test; the Accounts screen has its own tests.
+            ledgerAccountsProvider.overrideWith((ref) => Stream.value(const [])),
           ],
           child: MaterialApp.router(
             theme: dark ? AppTheme.dark() : AppTheme.light(),

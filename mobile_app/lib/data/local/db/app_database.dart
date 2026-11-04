@@ -1,6 +1,9 @@
 import 'package:drift/drift.dart';
 
+import 'ledger_tables.dart';
 import 'preset_categories.dart';
+
+export 'ledger_tables.dart';
 
 part 'app_database.g.dart';
 
@@ -68,20 +71,41 @@ class PayeeCategories extends Table {
   Set<Column> get primaryKey => {budgetSyncId, payeeKey};
 }
 
-@DriftDatabase(tables: [CategoryGroups, Categories, CategoryLinks, PayeeCategories])
+@DriftDatabase(
+  tables: [
+    CategoryGroups,
+    Categories,
+    CategoryLinks,
+    PayeeCategories,
+    LedgerAccounts,
+    LedgerPayees,
+    LedgerTransactions,
+    LedgerBudgets,
+    LedgerOutbox,
+    LedgerSyncState,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   /// The app opens it with `openAppDatabaseConnection` (encrypted); tests
   /// pass `NativeDatabase.memory()`.
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
       if (from < 2) await m.addColumn(categoryLinks, categoryLinks.updatedAt);
+      if (from < 3) {
+        // The local ledger (docs/plans/local-ledger.md, Phase 2).
+        for (final TableInfo table in [ledgerAccounts, ledgerPayees, ledgerTransactions, ledgerBudgets, ledgerOutbox, ledgerSyncState]) {
+          await m.createTable(table);
+        }
+        await m.createIndex(ledgerTransactionsAccountDate);
+        await m.createIndex(ledgerTransactionsScopeDate);
+      }
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
