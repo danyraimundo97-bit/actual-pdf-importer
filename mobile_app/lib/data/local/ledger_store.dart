@@ -7,6 +7,9 @@ import 'db/app_database.dart';
 /// The phone's scope: its own budget, before (or without) Actual.
 const phoneScope = '';
 
+/// The note on the transaction [LedgerStore.setBalance] adds.
+const balanceAdjustmentNote = 'Balance adjustment';
+
 /// A transaction to add, before it has an id.
 class LedgerDraft {
   final DateTime date;
@@ -18,6 +21,7 @@ class LedgerDraft {
   /// `pdfimport-…` or `app-<clientId>`; a second draft with the same one in
   /// the same account is skipped.
   final String? importedId;
+  final bool cleared;
 
   const LedgerDraft({
     required this.date,
@@ -26,6 +30,7 @@ class LedgerDraft {
     this.categoryId,
     this.notes,
     this.importedId,
+    this.cleared = false,
   });
 }
 
@@ -290,6 +295,7 @@ class LedgerStore {
                 categoryId: Value(draft.categoryId),
                 notes: Value(draft.notes),
                 importedId: Value(draft.importedId),
+                cleared: Value(draft.cleared),
                 createdAt: _at,
                 updatedAt: _at,
               ),
@@ -298,6 +304,39 @@ class LedgerStore {
         ids.add(id);
       }
       return (added: ids.length, skipped: skipped, ids: ids);
+    });
+  }
+
+  /// Makes the account hold [balanceCents], the way Actual's reconcile does:
+  /// nothing is rewritten, one cleared, uncategorized transaction dated [on]
+  /// makes up the difference, and the sync takes it to Actual like any other
+  /// row. Returns that difference; 0 adds nothing.
+  Future<int> setBalance(String accountId, int balanceCents, {required DateTime on}) {
+    return _db.transaction(() async {
+      final current = await _requireAccount(accountId);
+      final sum = _db.ledgerTransactions.amountCents.sum();
+      final row =
+          await (_db.selectOnly(_db.ledgerTransactions)
+                ..addColumns([sum])
+                ..where(
+                  _db.ledgerTransactions.accountId.equals(current.id) &
+                      _db.ledgerTransactions.deleted.equals(false) &
+                      _db.ledgerTransactions.parentId.isNull(),
+                ))
+              .getSingle();
+      final int held = row.read(sum) ?? 0;
+      final adjustment = balanceCents - held;
+      if (adjustment == 0) return 0;
+      await addTransactions(current.id, [
+        LedgerDraft(
+          date: on,
+          amountCents: adjustment,
+          notes: balanceAdjustmentNote,
+          importedId: 'app-${_uuid()}',
+          cleared: true,
+        ),
+      ]);
+      return adjustment;
     });
   }
 

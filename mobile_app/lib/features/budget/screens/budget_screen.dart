@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/dates.dart';
@@ -235,6 +236,15 @@ class _BudgetBody extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
           child: _Summary(data: data),
+        ),
+        const SizedBox(height: Space.md),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+          child: OutlinedButton.icon(
+            onPressed: () => context.push('/budget/transactions?month=${data.month}'),
+            icon: const Icon(Icons.receipt_long_outlined, size: 18),
+            label: const Text('All transactions'),
+          ),
         ),
         const SizedBox(height: Space.md),
         Padding(

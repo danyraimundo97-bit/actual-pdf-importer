@@ -2,20 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/api_exception.dart';
-import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/log/app_log.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/account_page.dart';
 import '../../../data/local/ledger_store.dart';
 import '../../../data/providers.dart';
-import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../account_page_controller.dart';
 import '../widgets/ledger_transaction_sheet.dart';
+import '../widgets/set_balance_sheet.dart';
+import '../widgets/transaction_rows.dart';
 
 const _log = AppLog('accounts');
 
@@ -98,6 +98,15 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     _log.info('Transaction changed', {'transaction': tx.id});
   }
 
+  Future<void> _setBalance(int current) async {
+    final adjustment = await showSetBalanceSheet(context, accountId: widget.accountId, currentCents: current);
+    if (adjustment == null || !mounted) return;
+    final message = adjustment == 0
+        ? 'The balance was already right.'
+        : 'Balance updated. Added an adjustment of ${formatCents(adjustment)}.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(accountPageProvider(widget.accountId));
@@ -124,7 +133,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(bottom: Space.xxl),
           children: [
-            _BalanceHeader(balanceCents: state.balanceCents),
+            _BalanceHeader(
+              balanceCents: state.balanceCents,
+              onSet: state.balanceCents == null ? null : () => _setBalance(state.balanceCents!),
+            ),
             if (state.rows.isEmpty)
               EmptyState(
                 icon: Icons.receipt_long_outlined,
@@ -134,7 +146,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     : 'Transactions added to this account in Actual, imported or added here show up in this list.',
               )
             else
-              ..._rowsWithDayHeaders(context, state.rows),
+              ...transactionRowsWithDayHeaders(
+                state.rows,
+                // Transfers and splits are read-only on the phone; the opening
+                // balance is changed in Settings › Accounts.
+                onTap: (tx) => !tx.transfer && tx.splits.isEmpty && !tx.openingBalance ? () => _edit(tx) : null,
+              ),
             if (state.loadingMore)
               const Padding(
                 padding: EdgeInsets.all(Space.lg),
@@ -151,28 +168,13 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
     return Scaffold(appBar: AppBar(title: Text(title)), body: body);
   }
-
-  List<Widget> _rowsWithDayHeaders(BuildContext context, List<AccountTransaction> rows) {
-    final out = <Widget>[];
-    DateTime? day;
-    for (final tx in rows) {
-      if (day == null || !DateUtils.isSameDay(day, tx.date)) {
-        day = tx.date;
-        out.add(_DayHeader(date: tx.date));
-      }
-      // Transfers and splits are read-only on the phone; the opening balance
-      // is changed in Settings › Accounts.
-      final canEdit = !tx.transfer && tx.splits.isEmpty && !tx.openingBalance;
-      out.add(_TransactionRow(tx: tx, onTap: canEdit ? () => _edit(tx) : null));
-    }
-    return out;
-  }
 }
 
 class _BalanceHeader extends StatelessWidget {
   final int? balanceCents;
+  final VoidCallback? onSet;
 
-  const _BalanceHeader({required this.balanceCents});
+  const _BalanceHeader({required this.balanceCents, required this.onSet});
 
   @override
   Widget build(BuildContext context) {
@@ -194,85 +196,13 @@ class _BalanceHeader extends StatelessWidget {
                     color: balance < 0 ? colors.error : null,
                   ),
                 ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DayHeader extends StatelessWidget {
-  final DateTime date;
-
-  const _DayHeader({required this.date});
-
-  @override
-  Widget build(BuildContext context) {
-    final label = dayLabel(date);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.gutter, Space.lg, Space.gutter, Space.xs),
-      child: Text(
-        label,
-        style: context.text.labelLarge?.copyWith(color: context.colors.onSurfaceVariant),
-      ),
-    );
-  }
-}
-
-class _TransactionRow extends StatelessWidget {
-  final AccountTransaction tx;
-  final VoidCallback? onTap;
-
-  const _TransactionRow({required this.tx, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colors;
-    final String detail;
-    if (tx.openingBalance) {
-      detail = 'Changed in Settings › Accounts';
-    } else if (tx.transfer) {
-      detail = 'Transfer';
-    } else if (tx.splits.isNotEmpty) {
-      detail = 'Split: ${tx.splits.map((s) => s.category ?? 'Uncategorized').toSet().join(', ')}';
-    } else {
-      detail = withEmoji(tx.categoryEmoji, tx.category ?? 'Uncategorized');
-    }
-    final uncategorized = !tx.openingBalance && !tx.transfer && tx.splits.isEmpty && tx.category == null;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: Space.gutter, vertical: Space.sm + 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tx.payee ?? (tx.openingBalance ? 'Opening balance' : 'No payee'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
-                ),
-                Text(
-                  detail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.bodySmall?.copyWith(color: uncategorized ? colors.primary : null),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: Space.md),
-          Text(
-            formatCents(tx.amountCents),
-            style: figures(context.text.bodyLarge).copyWith(
-              fontWeight: FontWeight.w500,
-              color: tx.amountCents > 0 ? context.tokens.inflow : null,
-            ),
+          const SizedBox(height: Space.sm),
+          OutlinedButton.icon(
+            onPressed: onSet,
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Set balance'),
           ),
         ],
-      ),
       ),
     );
   }

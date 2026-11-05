@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBudgetSession } from '../budget-session';
-import { addManualTransaction, buildQuickAddOptions, parseManualTransaction } from '../transactions';
+import {
+  addManualTransaction,
+  buildQuickAddOptions,
+  parseBalanceAdjustment,
+  parseManualTransaction,
+  setAccountBalance,
+} from '../transactions';
 import { makeFakeAdapter, SERVER } from './fake-actual';
 
 const VALID = { accountId: 'acc-1', date: '2026-11-02', amountCents: -450, payeeName: ' Café ', clientId: 'c0ffee00-1234' };
@@ -105,4 +111,70 @@ test('buildQuickAddOptions: open accounts on-budget first, visible categories, r
     { name: 'CAFE', lastCategoryId: null }, // newest is a split parent: no single category
     { name: 'LIDL', lastCategoryId: 'c1' },
   ]);
+});
+
+// --- Setting an account's balance ------------------------------------------
+
+const BALANCE = { date: '2026-11-05', balanceCents: 12_000, clientId: 'bada5500-1234' };
+
+test('parseBalanceAdjustment: validates, and accepts zero and negative balances', () => {
+  assert.deepEqual(parseBalanceAdjustment('acc-1', BALANCE), { accountId: 'acc-1', ...BALANCE });
+  assert.equal(parseBalanceAdjustment('acc-1', { ...BALANCE, balanceCents: 0 }).balanceCents, 0);
+  assert.equal(parseBalanceAdjustment('acc-1', { ...BALANCE, balanceCents: -500 }).balanceCents, -500);
+  assert.throws(() => parseBalanceAdjustment('acc-1', { ...BALANCE, balanceCents: undefined }), { code: 'MISSING_FIELD' });
+  assert.throws(() => parseBalanceAdjustment('acc-1', { ...BALANCE, balanceCents: 1.5 }), { code: 'INVALID_FIELD' });
+  assert.throws(() => parseBalanceAdjustment('acc-1', { ...BALANCE, date: 'today' }), { code: 'INVALID_FIELD' });
+  assert.throws(() => parseBalanceAdjustment('acc-1', { ...BALANCE, clientId: 'x' }), { code: 'INVALID_FIELD' });
+});
+
+/** An account already holding `cents`, from one earlier (and one post-dated) transaction. */
+function accountHolding(cents: number) {
+  const budget = budgetWith([{ id: 'acc-1' }]);
+  budget.rows.push({ id: 'old', account: 'acc-1', date: '2026-01-01', amount: cents - 100 });
+  budget.rows.push({ id: 'future', account: 'acc-1', date: '2027-01-01', amount: 100 });
+  return budget;
+}
+
+test('setAccountBalance adds the difference as one cleared adjustment, in either direction', async () => {
+  const up = accountHolding(10_000);
+  const raised = await setAccountBalance(up.session, { syncId: 'B' }, parseBalanceAdjustment('acc-1', BALANCE));
+  assert.equal(raised.adjustmentCents, 2_000);
+  assert.equal(raised.balanceCents, 12_000);
+  assert.equal(raised.created, true);
+  const added = up.rows.at(-1) as unknown as Record<string, unknown>;
+  assert.equal(added.amount, 2_000);
+  assert.equal(added.date, '2026-11-05');
+  assert.equal(added.cleared, true);
+  assert.equal(added.imported_id, 'app-bada5500-1234');
+  assert.equal(added.category, undefined);
+
+  const down = accountHolding(15_000);
+  const lowered = await setAccountBalance(down.session, { syncId: 'B' }, parseBalanceAdjustment('acc-1', BALANCE));
+  assert.equal(lowered.adjustmentCents, -3_000);
+});
+
+test('setAccountBalance adds nothing when the balance is already right', async () => {
+  const { session, addCalls } = accountHolding(12_000);
+  const result = await setAccountBalance(session, { syncId: 'B' }, parseBalanceAdjustment('acc-1', BALANCE));
+  assert.deepEqual(result, { id: null, created: false, adjustmentCents: 0, balanceCents: 12_000 });
+  assert.equal(addCalls(), 0);
+});
+
+test('a retry with the same clientId reports the adjustment already made and adds nothing', async () => {
+  const { session, addCalls } = accountHolding(10_000);
+  const input = parseBalanceAdjustment('acc-1', BALANCE);
+  const first = await setAccountBalance(session, { syncId: 'B' }, input);
+  const retry = await setAccountBalance(session, { syncId: 'B' }, input);
+  assert.deepEqual(retry, { ...first, created: false });
+  assert.equal(retry.adjustmentCents, 2_000);
+  assert.equal(addCalls(), 1);
+});
+
+test('setting the balance of an unknown or closed account is ACCOUNT_NOT_FOUND', async () => {
+  const { session } = budgetWith([{ id: 'acc-closed', closed: true }]);
+  for (const id of ['acc-nope', 'acc-closed']) {
+    await assert.rejects(setAccountBalance(session, { syncId: 'B' }, parseBalanceAdjustment(id, BALANCE)), {
+      code: 'ACCOUNT_NOT_FOUND',
+    });
+  }
 });

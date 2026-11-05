@@ -55,10 +55,36 @@ export const MAX_PAGE = 200;
 const truthy = (v: boolean | 0 | 1 | undefined) => v === true || v === 1;
 
 /** Newest first; within a day, Actual's own order (higher sort_order first), then id. */
-function compareNewestFirst(a: APTransaction, b: APTransaction): number {
+export function compareNewestFirst(a: APTransaction, b: APTransaction): number {
   return (
     b.date.localeCompare(a.date) || (b.sort_order ?? 0) - (a.sort_order ?? 0) || b.id.localeCompare(a.id)
   );
+}
+
+/** What the account holds: every transaction, including post-dated ones. A split's parent carries its total. */
+export function accountBalanceCents(transactions: Array<{ amount: number }>): number {
+  return transactions.reduce((sum, t) => sum + t.amount, 0);
+}
+
+export function accountPageRow(
+  t: APTransaction,
+  categoryNames: Map<string, string>,
+  payeeNames: Map<string, string>,
+): AccountPageRow {
+  const name = (map: Map<string, string>, id?: string | null) => (id ? (map.get(id) ?? null) : null);
+  return {
+    id: t.id,
+    date: t.date,
+    amountCents: t.amount,
+    payee: name(payeeNames, t.payee),
+    category: name(categoryNames, t.category),
+    notes: t.notes ?? null,
+    transfer: Boolean(t.transfer_id),
+    cleared: Boolean(t.cleared),
+    ...(t.subtransactions && t.subtransactions.length > 0
+      ? { splits: t.subtransactions.map((s) => ({ amountCents: s.amount, category: name(categoryNames, s.category) })) }
+      : {}),
+  };
 }
 
 export function buildAccountPage(input: {
@@ -71,7 +97,7 @@ export function buildAccountPage(input: {
 }): AccountPage {
   const { account, categoryNames, payeeNames } = input;
   const sorted = [...input.transactions].sort(compareNewestFirst);
-  const balanceCents = sorted.reduce((sum, t) => sum + t.amount, 0);
+  const balanceCents = accountBalanceCents(sorted);
 
   // The cursor is the last row's id: stable even when rows share a date.
   let start = 0;
@@ -82,22 +108,9 @@ export function buildAccountPage(input: {
   }
   const page = sorted.slice(start, start + input.limit);
 
-  const name = (map: Map<string, string>, id?: string | null) => (id ? (map.get(id) ?? null) : null);
   return {
     account: { id: account.id, name: account.name, offbudget: truthy(account.offbudget), balanceCents },
-    transactions: page.map((t) => ({
-      id: t.id,
-      date: t.date,
-      amountCents: t.amount,
-      payee: name(payeeNames, t.payee),
-      category: name(categoryNames, t.category),
-      notes: t.notes ?? null,
-      transfer: Boolean(t.transfer_id),
-      cleared: Boolean(t.cleared),
-      ...(t.subtransactions && t.subtransactions.length > 0
-        ? { splits: t.subtransactions.map((s) => ({ amountCents: s.amount, category: name(categoryNames, s.category) })) }
-        : {}),
-    })),
+    transactions: page.map((t) => accountPageRow(t, categoryNames, payeeNames)),
     ...(start + input.limit < sorted.length ? { nextCursor: page[page.length - 1].id } : {}),
   };
 }

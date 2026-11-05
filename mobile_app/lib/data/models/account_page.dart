@@ -45,6 +45,9 @@ class AccountTransaction {
   final String? notes;
   final bool transfer;
   final bool cleared;
+
+  /// Set when the row comes from a list spanning several accounts.
+  final String? accountName;
   final List<({int amountCents, String? category})> splits;
 
   /// The account's opening balance (the phone's ledger marks it; it's
@@ -61,6 +64,7 @@ class AccountTransaction {
     this.notes,
     this.transfer = false,
     this.cleared = false,
+    this.accountName,
     this.splits = const [],
     this.openingBalance = false,
   });
@@ -79,4 +83,20 @@ class AccountTransaction {
             .map((s) => (amountCents: s['amountCents'] as int, category: s['category'] as String?))
             .toList(),
       );
+}
+
+/// Every transaction of one month, across accounts. Totals as Home counts
+/// them: on-budget accounts, without transfers or opening balances.
+class MonthTransactions {
+  final String month;
+  final int incomeCents;
+  final int spendingCents;
+  final List<AccountTransaction> transactions;
+
+  const MonthTransactions({
+    required this.month,
+    required this.incomeCents,
+    required this.spendingCents,
+    required this.transactions,
+  });
 }

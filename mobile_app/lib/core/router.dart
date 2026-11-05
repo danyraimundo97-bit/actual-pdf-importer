@@ -10,6 +10,7 @@ import '../features/accounts/screens/account_screen.dart';
 import '../features/accounts/screens/move_accounts_screen.dart';
 import '../features/backups/screens/backups_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
+import '../features/budget/screens/month_transactions_screen.dart';
 import '../features/budget/screens/budget_style_screen.dart';
 import '../features/categories/screens/categories_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
@@ -115,7 +116,18 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           StatefulShellBranch(
-            routes: [GoRoute(path: '/budget', builder: (context, state) => const BudgetScreen())],
+            routes: [
+              GoRoute(
+                path: '/budget',
+                builder: (context, state) => const BudgetScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'transactions',
+                    builder: (context, state) => MonthTransactionsScreen(month: state.uri.queryParameters['month']),
+                  ),
+                ],
+              ),
+            ],
           ),
           StatefulShellBranch(
             routes: [GoRoute(path: '/import', builder: (context, state) => const ImportScreen())],

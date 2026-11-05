@@ -1,3 +1,4 @@
+import '../models/account_page.dart';
 import '../models/budget_month.dart';
 import '../models/dashboard.dart';
 import 'db/app_database.dart';
@@ -121,6 +122,62 @@ List<_Leaf> _uncategorizedFlows(List<_Leaf> flows, DateTime today) {
     for (final f in flows)
       if (f.categoryId == null && f.date.compareTo(cutoff) >= 0) f,
   ];
+}
+
+/// Every transaction of [month] in every account, newest first, with the
+/// month's totals. A transfer shows twice, once per account: both rows exist.
+MonthTransactions buildMonthTransactions({
+  required String month,
+  required List<LedgerAccount> accounts,
+  required List<LedgerTransaction> transactions,
+  required Map<String, String> categoryNames,
+  required Map<String, String> categoryEmojis,
+  required Map<String, String> payeeNames,
+}) {
+  var income = 0;
+  var spending = 0;
+  for (final f in _flows(accounts, transactions)) {
+    if (_month(f.date) != month) continue;
+    if (f.amountCents > 0) {
+      income += f.amountCents;
+    } else {
+      spending -= f.amountCents;
+    }
+  }
+  final accountNames = {for (final a in accounts) a.id: a.name};
+  final shaped = _shape(transactions);
+  final rows = shaped.top.where((t) => _month(t.date) == month).toList()
+    ..sort((a, b) {
+      final byDate = b.date.compareTo(a.date);
+      if (byDate != 0) return byDate;
+      final byCreated = b.createdAt.compareTo(a.createdAt);
+      return byCreated != 0 ? byCreated : b.id.compareTo(a.id);
+    });
+  return MonthTransactions(
+    month: month,
+    incomeCents: income,
+    spendingCents: spending,
+    transactions: [
+      for (final t in rows)
+        AccountTransaction(
+          id: t.id,
+          date: DateTime.parse(t.date),
+          amountCents: t.amountCents,
+          payee: payeeNames[t.payeeId],
+          openingBalance: t.startingBalance,
+          category: categoryNames[t.categoryId],
+          categoryEmoji: categoryEmojis[t.categoryId],
+          notes: t.notes,
+          transfer: t.transferId != null,
+          cleared: t.cleared,
+          accountName: accountNames[t.accountId] ?? 'Unknown account',
+          splits: [
+            for (final c in shaped.children[t.id] ?? const <LedgerTransaction>[])
+              (amountCents: c.amountCents, category: categoryNames[c.categoryId]),
+          ],
+        ),
+    ],
+  );
 }
 
 /// What Home counts as without a category, newest first.

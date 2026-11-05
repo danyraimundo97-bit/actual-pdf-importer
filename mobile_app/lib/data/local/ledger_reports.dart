@@ -61,6 +61,19 @@ class LedgerReports {
     );
   }
 
+  /// Every transaction of [month] (`YYYY-MM`), across all accounts.
+  Future<MonthTransactions> monthTransactions(String scope, String month) async {
+    final looks = await _categoryLooks(scope);
+    return buildMonthTransactions(
+      month: month,
+      accounts: await _store.accounts(scope),
+      transactions: await _store.allTransactions(scope),
+      categoryNames: _names(looks),
+      categoryEmojis: _emojis(looks),
+      payeeNames: await _store.payeeNames(scope),
+    );
+  }
+
   /// One page of an account, newest first; the cursor is the next offset.
   Future<AccountPage> accountPage(String accountId, {String? before, int limit = 50}) async {
     final account = await _store.account(accountId);

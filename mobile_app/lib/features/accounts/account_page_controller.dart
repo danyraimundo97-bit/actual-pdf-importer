@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/api_exception.dart';
 import '../../core/log/app_log.dart';
+import '../../data/ledger_sync_controller.dart';
 import '../../data/models/account_page.dart';
 import '../../data/providers.dart';
 
@@ -78,6 +79,19 @@ class AccountPageController extends AutoDisposeFamilyNotifier<AccountPageState, 
       _log.error('Account could not be read', e, stack, {'account': arg});
       state = AccountPageState(name: state.name, rows: state.rows, loading: false, error: e, onPhone: state.onPhone);
     }
+  }
+
+  /// Sets what the account really holds, adding the difference to the ledger;
+  /// returns it. Syncs first if it can, so the difference is worked out from
+  /// what Actual holds now, but never waits long: this has to work offline.
+  /// The list reloads by itself (it watches the ledger).
+  Future<int> setBalance(int balanceCents) async {
+    final sync = ref.read(ledgerSyncProvider.notifier);
+    await sync.syncNow().timeout(const Duration(seconds: 3), onTimeout: () {});
+    final adjustment = await ref.read(ledgerStoreProvider).setBalance(arg, balanceCents, on: DateTime.now());
+    _log.info('Balance set', {'account': arg, 'adjusted': adjustment != 0});
+    if (adjustment != 0) sync.request(delay: Duration.zero);
+    return adjustment;
   }
 
   /// The next page, if there is one and none is loading.

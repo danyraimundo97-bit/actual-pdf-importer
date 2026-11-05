@@ -19,6 +19,7 @@ import 'ledger_sync_controller.dart';
 import 'local/secret_store.dart';
 import 'local/settings_store.dart';
 import 'models/backend_config.dart';
+import 'models/account_page.dart';
 import 'models/budget_month.dart';
 import 'models/dashboard.dart';
 import 'pdf/local_statement_reader.dart';
@@ -298,6 +299,14 @@ final uncategorizedProvider = FutureProvider.autoDispose<List<UncategorizedTrans
   if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
   ref.watch(ledgerChangesProvider);
   return ref.watch(ledgerReportsProvider).uncategorized(scope);
+});
+
+/// Every transaction of one month (`YYYY-MM`), from the ledger.
+final monthTransactionsProvider = FutureProvider.autoDispose.family<MonthTransactions, String>((ref, month) async {
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
+  ref.watch(ledgerChangesProvider);
+  return ref.watch(ledgerReportsProvider).monthTransactions(scope, month);
 });
 
 /// The style of the budget on screen: the phone's own choice, or what the last

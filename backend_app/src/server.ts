@@ -35,11 +35,18 @@ import {
 } from './actual';
 import { actualSdkAdapter, isHandledSdkError } from './actual-adapter';
 import { getDashboard } from './dashboard';
-import { addManualTransaction, getQuickAddOptions, parseManualTransaction } from './transactions';
+import {
+  addManualTransaction,
+  getQuickAddOptions,
+  parseBalanceAdjustment,
+  parseManualTransaction,
+  setAccountBalance,
+} from './transactions';
 import { getAccountPage, parseLimit } from './account-page';
 import { getBudgetMonth, parseMonth } from './budget-month';
 import { defaultEpochsFile, LedgerEpochs, pullLedger } from './ledger';
 import { defaultClientIdsFile, LedgerClientIds, MAX_PUSH_ENTRIES, pushLedger } from './ledger-push';
+import { getMonthTransactions } from './month-transactions';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import {
   clearCategoryMappings,
@@ -470,6 +477,22 @@ app.get('/accounts/:id/transactions', async (req: Request, res: Response) => {
   }
 });
 
+/** Sets what an account really holds, by adding the difference. Safe to retry with the same clientId. */
+app.post('/accounts/:id/balance', async (req: Request, res: Response) => {
+  try {
+    const input = parseBalanceAdjustment(req.params.id, req.body);
+    const budget = resolveBudgetRef(req.body?.budgetSyncId, req.body?.budgetPassword);
+    const result = await setAccountBalance(budgetSession, budget, input);
+    requestLog(res).info(
+      { accountId: input.accountId, id: result.id, created: result.created },
+      result.created ? 'Balance adjusted' : 'Balance already right (or retry)',
+    );
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while setting the balance.');
+  }
+});
+
 /** This month's budget (or `month=YYYY-MM`): budgeted, spent and left per category. */
 app.get('/budget-month', async (req: Request, res: Response) => {
   try {
@@ -550,6 +573,16 @@ app.post('/ledger/push', async (req: Request, res: Response) => {
     res.json({ results: push.results });
   } catch (err) {
     sendImporterError(res, err, 'Internal error while sending the phone\'s changes to the budget.');
+  }
+});
+
+/** Every transaction of one month (`month=YYYY-MM`, default this one), across all accounts. */
+app.get('/month-transactions', async (req: Request, res: Response) => {
+  try {
+    const month = parseMonth(req.query.month);
+    res.json(await getMonthTransactions(budgetSession, resolveBudgetRef(req.query.budgetSyncId), month));
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while loading the month.');
   }
 });
 

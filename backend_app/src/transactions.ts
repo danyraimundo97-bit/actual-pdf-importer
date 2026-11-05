@@ -1,3 +1,4 @@
+import { accountBalanceCents } from './account-page';
 import type { ActualPort, BudgetRef, BudgetSession } from './budget-session';
 import { AccountNotFoundError, ImporterError, InvalidFieldError } from './errors';
 
@@ -117,6 +118,96 @@ export async function addManualInTurn(
     { runTransfers: false, learnCategories: false },
   );
   return { id: (await findOurs())?.id ?? null, created: true };
+}
+
+// --- POST /accounts/:id/balance ---------------------------------------------
+
+export const BALANCE_ADJUSTMENT_NOTE = 'Balance adjustment';
+
+export interface BalanceAdjustment {
+  accountId: string;
+  date: string; // YYYY-MM-DD
+  balanceCents: number; // what the account really holds; negative = owed
+  clientId: string;
+}
+
+/** Validates POST /accounts/:id/balance's body. */
+export function parseBalanceAdjustment(accountId: string, body: unknown): BalanceAdjustment {
+  const b = (body ?? {}) as Record<string, unknown>;
+  for (const field of ['date', 'balanceCents', 'clientId']) {
+    if (b[field] === undefined || b[field] === null || b[field] === '') throw new MissingFieldError(field);
+  }
+  if (typeof b.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.date) || Number.isNaN(Date.parse(b.date))) {
+    throw new InvalidFieldError('date', 'expected YYYY-MM-DD');
+  }
+  if (typeof b.balanceCents !== 'number' || !Number.isInteger(b.balanceCents)) {
+    throw new InvalidFieldError('balanceCents', 'must be whole cents');
+  }
+  if (Math.abs(b.balanceCents) > 1_000_000_000) throw new InvalidFieldError('balanceCents', 'too large');
+  if (typeof b.clientId !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(b.clientId)) {
+    throw new InvalidFieldError('clientId', 'expected 8-64 letters, digits or dashes');
+  }
+  return { accountId, date: b.date, balanceCents: b.balanceCents, clientId: b.clientId };
+}
+
+/**
+ * Makes an account hold what the user says it holds, the way Actual's own
+ * reconcile does: nothing is rewritten, one cleared, uncategorized
+ * transaction makes up the difference.
+ *
+ * The difference is worked out here, inside the write turn (which syncs
+ * first), never on the phone: the balance on its screen may be stale. A
+ * retry with the same clientId returns the adjustment already made; working
+ * it out again would see no difference and report 0.
+ */
+export async function setAccountBalance(
+  session: BudgetSession,
+  budget: BudgetRef,
+  input: BalanceAdjustment,
+): Promise<{ id: string | null; created: boolean; adjustmentCents: number; balanceCents: number }> {
+  const importedId = `${MANUAL_ID_PREFIX}${input.clientId}`;
+  return session.withBudget(
+    budget,
+    async (actual) => {
+      const account = (await actual.getAccounts()).find((a) => a.id === input.accountId);
+      if (!account || account.closed) throw new AccountNotFoundError(input.accountId);
+
+      const all = () => actual.getTransactions(input.accountId, '1970-01-01', '2999-12-31');
+      const before = await all();
+
+      const existing = before.find((t) => t.imported_id === importedId);
+      if (existing) {
+        return {
+          id: existing.id,
+          created: false,
+          adjustmentCents: existing.amount,
+          balanceCents: accountBalanceCents(before),
+        };
+      }
+
+      const adjustmentCents = input.balanceCents - accountBalanceCents(before);
+      if (adjustmentCents === 0) {
+        return { id: null, created: false, adjustmentCents: 0, balanceCents: input.balanceCents };
+      }
+
+      await actual.addTransactions(
+        input.accountId,
+        [
+          {
+            date: input.date,
+            amount: adjustmentCents,
+            notes: BALANCE_ADJUSTMENT_NOTE,
+            cleared: true,
+            imported_id: importedId,
+          },
+        ],
+        { runTransfers: false, learnCategories: false },
+      );
+      const added = (await all()).find((t) => t.imported_id === importedId);
+      return { id: added?.id ?? null, created: true, adjustmentCents, balanceCents: input.balanceCents };
+    },
+    { write: true },
+  );
 }
 
 // --- GET /quick-add/options ------------------------------------------------
