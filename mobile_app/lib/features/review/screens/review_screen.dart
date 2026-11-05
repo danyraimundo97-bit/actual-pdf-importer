@@ -25,6 +25,7 @@ import '../../accounts/widgets/account_sheet.dart';
 import '../../categories/category_matching.dart';
 import '../csv_export.dart';
 import '../phone_save.dart';
+import '../widgets/duplicates_sheet.dart';
 import '../widgets/import_result_sheet.dart';
 import '../widgets/save_into_sheet.dart';
 import '../widgets/transaction_edit_sheet.dart';
@@ -116,6 +117,24 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     }
   }
 
+  /// Asks about lines with the same date and amount as a transaction the
+  /// account already has. What's left to save, or null if the user backed out.
+  Future<List<ParsedTransaction>?> _withoutDuplicates(String accountId, List<ParsedTransaction> included) async {
+    final found = await ref.read(ledgerStoreProvider).possibleDuplicates(accountId, statementDrafts(included));
+    if (found.isEmpty) return included;
+    if (!mounted) return null;
+    final same = await showDuplicatesSheet(
+      context,
+      [for (final d in found) (index: d.line, line: included[d.line], existingPayee: d.existingPayee)],
+    );
+    if (same == null) return null;
+    _log.info('Possible duplicates answered', {'found': found.length, 'skipped': same.length});
+    return [
+      for (final (i, t) in included.indexed)
+        if (!same.contains(i)) t,
+    ];
+  }
+
   /// Saves the selected lines into the chosen phone account. Lines the
   /// account already has (same importedId) are skipped, so saving a
   /// statement twice adds nothing.
@@ -127,7 +146,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     try {
       final store = ref.read(ledgerStoreProvider);
       final bankId = widget.args.parseResult.bankId;
-      final saved = await store.addStatement(account.id, statementDrafts(included));
+      final toSave = await _withoutDuplicates(account.id, included);
+      if (toSave == null) return;
+      final saved = await store.addStatement(account.id, statementDrafts(toSave));
       if (account.bankId == null) await store.updateAccount(account.id, bankId: bankId);
       await ref.read(settingsStoreProvider).setLastLedgerAccountFor(bankId, account.id);
       await _rememberLocally(included);
@@ -142,7 +163,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       });
       final result = ImportResult(
         added: saved.added,
-        updated: saved.skipped,
+        updated: saved.skipped + included.length - toSave.length,
         categorized: categorized,
         addedIds: saved.ids,
         phoneAccount: (id: account.id, name: account.name),
@@ -323,7 +344,9 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       final store = ref.read(ledgerStoreProvider);
       final budgetSyncId = widget.args.budgetSyncId;
       if (budgetSyncId != null) await ref.read(ledgerSyncProvider.notifier).ensurePulled(budgetSyncId);
-      final saved = await store.addTransactions(account.id, statementDrafts(included, keepLines: true));
+      final toSave = await _withoutDuplicates(account.id, included);
+      if (toSave == null) return;
+      final saved = await store.addTransactions(account.id, statementDrafts(toSave, keepLines: true));
       var categorized = 0;
       for (final id in saved.ids) {
         if ((await store.transaction(id))?.categoryId != null) categorized++;
@@ -336,7 +359,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
       ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
       final result = ImportResult(
         added: saved.added,
-        updated: saved.skipped,
+        updated: saved.skipped + included.length - toSave.length,
         categorized: categorized,
         addedIds: saved.ids,
         inLedger: true,

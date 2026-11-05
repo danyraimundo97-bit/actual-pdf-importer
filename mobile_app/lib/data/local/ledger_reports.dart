@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../core/format/category_emoji.dart';
+import '../category_suggestions.dart';
 import '../models/account_page.dart';
 import '../models/actual_account.dart';
 import '../models/actual_category.dart';
@@ -35,7 +36,8 @@ class LedgerReports {
       payeeNames: await _store.payeeNames(scope),
       today: _now(),
       months: months,
-      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
+      notInBalances: await _store.uncountedCategoryIds(scope),
+      notCounted: await _notCountedInTotals(scope, looks),
     );
   }
 
@@ -54,7 +56,7 @@ class LedgerReports {
     return buildLedgerBudgetMonth(
       month: month ?? ledgerMonthKeys(today, 1).single,
       categoryEmojis: _emojis(looks),
-      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
+      notCounted: await _notCountedInTotals(scope, looks),
       style: BudgetStyle.parse(await _store.budgetMode(scope)),
       groups: await _budgetGroups(scope),
       accounts: await _store.accounts(scope),
@@ -74,7 +76,7 @@ class LedgerReports {
       categoryNames: _names(looks),
       categoryEmojis: _emojis(looks),
       payeeNames: await _store.payeeNames(scope),
-      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
+      notCounted: await _notCountedInTotals(scope, looks),
     );
   }
 
@@ -91,7 +93,8 @@ class LedgerReports {
               ..where(
                 _db.ledgerTransactions.accountId.equals(account.id) &
                     _db.ledgerTransactions.deleted.equals(false) &
-                    _db.ledgerTransactions.parentId.isNull(),
+                    _db.ledgerTransactions.parentId.isNull() &
+                    _store.countsInBalance(await _store.uncountedCategoryIds(account.scope)),
               ))
             .getSingle();
     final parents = [
@@ -162,10 +165,53 @@ class LedgerReports {
           if (g.isIncome) g.id,
       },
       recentPayees: recent.values.toList(),
+      notCountedCategoryIds: await _notCountedInTotals(scope, await _categoryLooks(scope)),
+      betweenAccountsCategoryIds: _notCounted(await _categoryLooks(scope), await _betweenAccountsCategories(scope)),
     );
   }
 
   static const _recentPayees = 50;
+
+  /// Every payee with a transaction, most recent first, each with the category
+  /// it last had.
+  Future<List<RecentPayee>> payeeHistory(String scope) async {
+    final names = await _store.payeeNames(scope);
+    final rows = (await _store.allTransactions(scope)).where((t) => t.payeeId != null && t.transferId == null && !t.startingBalance).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final found = <String, RecentPayee>{};
+    for (final t in rows) {
+      final name = names[t.payeeId];
+      if (name == null || found.containsKey(name)) continue;
+      found[name] = RecentPayee(name: name, lastCategoryId: t.isParent ? null : t.categoryId);
+    }
+    return found.values.toList();
+  }
+
+  /// The category [payee] should get in [scope]: its mapping, else the one it
+  /// last had. A mapping holds the phone's ids, so for an Actual budget it goes
+  /// through the link to Actual's category, and is skipped without one.
+  Future<String?> suggestedCategory(String scope, String payee) async {
+    final key = categoryMemoryKey(payee);
+    if (key.isEmpty) return null;
+    final mapped =
+        await (_db.select(_db.payeeCategories)..where(
+              (p) => p.budgetSyncId.equals(scope) & p.payeeKey.equals(key) & p.deleted.equals(false),
+            ))
+            .getSingleOrNull();
+    if (mapped != null) {
+      if (scope == phoneScope) return mapped.categoryId;
+      final link =
+          await (_db.select(_db.categoryLinks)..where(
+                (l) => l.budgetSyncId.equals(scope) & l.categoryId.equals(mapped.categoryId),
+              ))
+              .get();
+      if (link.isNotEmpty) return link.first.actualCategoryId;
+    }
+    for (final p in await payeeHistory(scope)) {
+      if (categoryMemoryKey(p.name) == key) return p.lastCategoryId;
+    }
+    return null;
+  }
 
   /// [scope]'s visible categories, for a category picker.
   Future<List<ActualCategoryGroup>> categoryPicker(String scope) async =>
@@ -232,6 +278,12 @@ class LedgerReports {
     ...linked,
     for (final e in looks.entries)
       if (_betweenAccountsNames.contains(_nameKey(e.value.name))) e.key,
+  };
+
+  /// Everything left out of income, spending and the budget.
+  Future<Set<String>> _notCountedInTotals(String scope, Map<String, _CategoryLook> looks) async => {
+    ..._notCounted(looks, await _betweenAccountsCategories(scope)),
+    ...await _store.uncountedCategoryIds(scope),
   };
 
   static const _betweenAccountsPreset = 'money.between_accounts';

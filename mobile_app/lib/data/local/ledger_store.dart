@@ -1,3 +1,6 @@
+import '../../core/format/category_emoji.dart';
+import '../../core/format/fold.dart';
+import '../category_suggestions.dart';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
@@ -34,6 +37,10 @@ class LedgerDraft {
   });
 }
 
+/// A statement line ([line], its index among the drafts) with the same date
+/// and amount as a transaction the account already has.
+typedef PossibleDuplicate = ({int line, LedgerTransaction existing, String? existingPayee});
+
 /// An account with its balance (every live top-level row, transfers and
 /// the opening balance included), for lists.
 typedef LedgerAccountView = ({LedgerAccount account, int balanceCents});
@@ -53,7 +60,10 @@ class LedgerStore {
   // Accounts -----------------------------------------------------------------
 
   /// Live accounts in their order, open ones first, with balances.
-  Stream<List<LedgerAccountView>> watchAccounts(String scope) {
+  Stream<List<LedgerAccountView>> watchAccounts(String scope) =>
+      Stream.fromFuture(uncountedCategoryIds(scope)).asyncExpand((uncounted) => _watchAccounts(scope, uncounted));
+
+  Stream<List<LedgerAccountView>> _watchAccounts(String scope, Set<String> uncounted) {
     final balance = _db.ledgerTransactions.amountCents.sum();
     final query =
         _db.select(_db.ledgerAccounts).join([
@@ -61,7 +71,8 @@ class LedgerStore {
               _db.ledgerTransactions,
               _db.ledgerTransactions.accountId.equalsExp(_db.ledgerAccounts.id) &
                   _db.ledgerTransactions.deleted.equals(false) &
-                  _db.ledgerTransactions.parentId.isNull(),
+                  _db.ledgerTransactions.parentId.isNull() &
+                  countsInBalance(uncounted),
               useColumns: false,
             ),
           ])
@@ -75,6 +86,33 @@ class LedgerStore {
       ],
     );
   }
+
+  /// The "Not counted" category of [scope]: the phone's preset, or the Actual
+  /// categories matched to it or named like it. Its rows are listed, but left
+  /// out of balances and net worth as well as the totals.
+  Future<Set<String>> uncountedCategoryIds(String scope) async {
+    final preset = await (_db.select(_db.categories)..where((c) => c.presetKey.equals(notCountedPreset))).getSingleOrNull();
+    if (scope == phoneScope) return {?preset?.id};
+    final links = preset == null
+        ? const <CategoryLink>[]
+        : await (_db.select(
+            _db.categoryLinks,
+          )..where((l) => l.budgetSyncId.equals(scope) & l.categoryId.equals(preset.id))).get();
+    final copies = await (_db.select(_db.ledgerCategories)..where((c) => c.scope.equals(scope))).get();
+    return {
+      for (final l in links) l.actualCategoryId,
+      for (final c in copies)
+        if (_notCountedNames.contains(foldAccents(splitCategoryName(c.name).name).trim().toLowerCase())) c.id,
+    };
+  }
+
+  static const notCountedPreset = 'money.not_counted';
+  static const _notCountedNames = {'not counted', 'nao contabilizar'};
+
+  /// For a balance's sum: a row counts unless it's in one of [uncounted].
+  Expression<bool> countsInBalance(Set<String> uncounted) => uncounted.isEmpty
+      ? const Constant(true)
+      : _db.ledgerTransactions.categoryId.isNull() | _db.ledgerTransactions.categoryId.isNotIn(uncounted);
 
   Future<LedgerAccount?> account(String id) async {
     final current = await currentId(id);
@@ -315,13 +353,15 @@ class LedgerStore {
     return _db.transaction(() async {
       final current = await _requireAccount(accountId);
       final sum = _db.ledgerTransactions.amountCents.sum();
+      final uncounted = await uncountedCategoryIds(current.scope);
       final row =
           await (_db.selectOnly(_db.ledgerTransactions)
                 ..addColumns([sum])
                 ..where(
                   _db.ledgerTransactions.accountId.equals(current.id) &
                       _db.ledgerTransactions.deleted.equals(false) &
-                      _db.ledgerTransactions.parentId.isNull(),
+                      _db.ledgerTransactions.parentId.isNull() &
+                      countsInBalance(uncounted),
                 ))
               .getSingle();
       final int held = row.read(sum) ?? 0;
@@ -338,6 +378,83 @@ class LedgerStore {
       ]);
       return adjustment;
     });
+  }
+
+  /// Money moved between two of your own accounts: [draft] in [accountId], and
+  /// the opposite amount in [otherAccountId], so both balances stay right and
+  /// net worth doesn't move. Each row's note names the other account. They
+  /// aren't linked: changing one leaves the other. Safe to retry, like
+  /// [addTransaction], when the draft has an importedId.
+  Future<String?> addBetweenAccounts(String accountId, String otherAccountId, LedgerDraft draft) {
+    return _db.transaction(() async {
+      final account = await _requireAccount(accountId);
+      final other = await _requireAccount(otherAccountId);
+      if (account.id == other.id) throw StateError('The same account on both sides.');
+      if (account.scope != other.scope) throw StateError('Accounts from different budgets.');
+      final importedId = draft.importedId ?? 'app-${_uuid()}';
+      String note(bool income, String name) {
+        final where = '${income ? 'From' : 'To'}: $name';
+        final mine = draft.notes?.trim() ?? '';
+        return mine.isEmpty ? where : '$where · $mine';
+      }
+
+      final income = draft.amountCents > 0;
+      final id = await addTransaction(
+        account.id,
+        LedgerDraft(
+          date: draft.date,
+          amountCents: draft.amountCents,
+          payee: draft.payee,
+          categoryId: draft.categoryId,
+          notes: note(income, other.name),
+          importedId: importedId,
+          cleared: draft.cleared,
+        ),
+      );
+      await addTransaction(
+        other.id,
+        LedgerDraft(
+          date: draft.date,
+          amountCents: -draft.amountCents,
+          payee: draft.payee,
+          categoryId: draft.categoryId,
+          notes: note(!income, account.name),
+          importedId: '$importedId-other',
+          cleared: draft.cleared,
+        ),
+      );
+      return id;
+    });
+  }
+
+  /// The [drafts] that might already be in the account under another id: same
+  /// date and amount as an existing row. A quick-added purchase, say, is the
+  /// same money as its statement line, but nothing else says so. Each row
+  /// answers for one line, so two equal purchases and one saved row ask once.
+  /// Lines whose importedId the account has are left out: those are skipped
+  /// for certain ([addTransactions]).
+  Future<List<PossibleDuplicate>> possibleDuplicates(String accountId, List<LedgerDraft> drafts) async {
+    final account = await _requireAccount(accountId);
+    final rows = await transactions(account.id);
+    final known = {
+      for (final t in await (_db.select(_db.ledgerTransactions)..where((t) => t.accountId.equals(account.id))).get())
+        ?t.importedId,
+    };
+    final available = [
+      for (final t in rows)
+        if (!t.startingBalance) t,
+    ];
+    final names = await payeeNames(account.scope);
+    final found = <PossibleDuplicate>[];
+    for (final (i, draft) in drafts.indexed) {
+      if (draft.importedId != null && known.contains(draft.importedId)) continue;
+      final date = ledgerDate(draft.date);
+      final at = available.indexWhere((t) => t.date == date && t.amountCents == draft.amountCents);
+      if (at < 0) continue;
+      final existing = available.removeAt(at);
+      found.add((line: i, existing: existing, existingPayee: names[existing.payeeId]));
+    }
+    return found;
   }
 
   /// Saves a reviewed statement ([addTransactions]) keeping the account's
@@ -400,6 +517,33 @@ class LedgerStore {
         ),
       );
       await _queue(tx.scope, 'transaction', tx.id);
+    });
+  }
+
+  /// [payee]'s rows, matched as the category memory matches payees, that
+  /// aren't in [categoryId] and can be changed here: id → current category.
+  /// Transfers, splits and opening balances stay as they are.
+  Future<Map<String, String?>> payeeRowsOutside(String scope, String payee, String categoryId) async {
+    final key = categoryMemoryKey(payee);
+    final names = await payeeNames(scope);
+    return {
+      for (final t in await allTransactions(scope))
+        if (t.payeeId != null &&
+            names[t.payeeId] != null &&
+            categoryMemoryKey(names[t.payeeId]!) == key &&
+            t.categoryId != categoryId &&
+            !_linked(t) &&
+            !t.startingBalance)
+          t.id: t.categoryId,
+    };
+  }
+
+  /// Sets each row's category (null clears it), all or none.
+  Future<void> setCategories(Map<String, String?> byRow) {
+    return _db.transaction(() async {
+      for (final e in byRow.entries) {
+        await updateTransaction(e.key, categoryId: e.value, clearCategory: e.value == null);
+      }
     });
   }
 

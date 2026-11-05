@@ -108,6 +108,10 @@ class MonthTransactions {
   final Set<String> incomeIds;
   final Set<String> spendingIds;
 
+  /// Category id → row id → how much of that row is in the category: the whole
+  /// row, or the matching parts of a split.
+  final Map<String, Map<String, int>> categoryCents;
+
   const MonthTransactions({
     required this.month,
     required this.incomeCents,
@@ -115,7 +119,32 @@ class MonthTransactions {
     required this.transactions,
     this.incomeIds = const {},
     this.spendingIds = const {},
+    this.categoryCents = const {},
   });
+
+  /// A category's rows, each showing only its share, so they add up to the
+  /// category's figure in the budget.
+  List<AccountTransaction> rowsInCategory(String categoryId) {
+    final shares = categoryCents[categoryId] ?? const <String, int>{};
+    return [
+      for (final t in transactions)
+        if (shares[t.id] case final cents?)
+          AccountTransaction(
+            id: t.id,
+            date: t.date,
+            amountCents: cents,
+            payee: t.payee,
+            openingBalance: t.openingBalance,
+            category: t.category,
+            categoryEmoji: t.categoryEmoji,
+            notes: t.notes,
+            transfer: t.transfer,
+            cleared: t.cleared,
+            accountName: t.accountName,
+            splits: t.splits,
+          ),
+    ];
+  }
 
   List<AccountTransaction> rows(MonthFlowFilter filter) => switch (filter) {
     MonthFlowFilter.all => transactions,

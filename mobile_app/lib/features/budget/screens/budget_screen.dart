@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -128,6 +129,12 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                   collapsed: _collapsed,
                   onToggle: _toggle,
                   onEdit: (c) => _edit(data.month, c),
+                  onOpen: (id, name) => context.push(
+                    Uri(
+                      path: '/budget/transactions',
+                      queryParameters: {'month': data.month, 'category': id, 'name': name},
+                    ).toString(),
+                  ),
                   onCopyLastMonth: () => _copyLastMonth(data.month),
                 ),
               ),
@@ -212,6 +219,9 @@ class _BudgetBody extends StatelessWidget {
   final ValueChanged<BudgetCategory>? onEdit;
   final VoidCallback? onCopyLastMonth;
 
+  /// Opens a category's transactions for this month.
+  final void Function(String id, String name) onOpen;
+
   /// The phone's own budget (else a copy of the Actual one).
   final bool onPhone;
   final Set<String> collapsed;
@@ -224,6 +234,7 @@ class _BudgetBody extends StatelessWidget {
     required this.onToggle,
     this.onEdit,
     this.onCopyLastMonth,
+    required this.onOpen,
   });
 
   @override
@@ -276,8 +287,9 @@ class _BudgetBody extends StatelessWidget {
             open: !collapsed.contains(group.id),
             onToggle: () => onToggle(group.id),
             onEdit: onEdit,
+            onOpen: onOpen,
           ),
-        if (data.income.isNotEmpty) _IncomeSection(income: data.income),
+        if (data.income.isNotEmpty) _IncomeSection(income: data.income, onOpen: onOpen),
       ],
     );
   }
@@ -374,8 +386,15 @@ class _GroupSection extends StatelessWidget {
   final bool open;
   final VoidCallback onToggle;
   final ValueChanged<BudgetCategory>? onEdit;
+  final void Function(String id, String name) onOpen;
 
-  const _GroupSection({required this.group, required this.open, required this.onToggle, this.onEdit});
+  const _GroupSection({
+    required this.group,
+    required this.open,
+    required this.onToggle,
+    this.onEdit,
+    required this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -415,7 +434,11 @@ class _GroupSection extends StatelessWidget {
               ? Column(
                   children: [
                     for (final c in group.categories)
-                      _CategoryRow(category: c, onTap: onEdit == null ? null : () => onEdit!(c)),
+                      _CategoryRow(
+                        category: c,
+                        onOpen: () => onOpen(c.id, c.name),
+                        onEdit: onEdit == null ? null : () => onEdit!(c),
+                      ),
                   ],
                 )
               // Folded: one bar for the whole group, so it still reads.
@@ -462,10 +485,14 @@ class _Bar extends StatelessWidget {
 class _CategoryRow extends StatelessWidget {
   final BudgetCategory category;
 
-  /// Null when the amounts are Actual's (read-only here).
-  final VoidCallback? onTap;
+  /// The row opens the category's transactions.
+  final VoidCallback onOpen;
 
-  const _CategoryRow({required this.category, this.onTap});
+  /// The amount on the right sets the budget. Null when the amounts are
+  /// Actual's (read-only here).
+  final VoidCallback? onEdit;
+
+  const _CategoryRow({required this.category, required this.onOpen, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
@@ -473,17 +500,18 @@ class _CategoryRow extends StatelessWidget {
     final over = category.overspent;
     final spent = formatBalance(-category.spentCents);
     if (category.budgetedCents == 0 && category.spentCents == 0 && category.balanceCents == 0) {
-      return _UnusedCategoryRow(name: category.name, emoji: category.emoji, onTap: onTap);
+      return _UnusedCategoryRow(name: category.name, emoji: category.emoji, onOpen: onOpen, onEdit: onEdit);
     }
     final note = context.text.bodySmall?.copyWith(color: over ? colors.error : colors.onSurfaceVariant);
     return Semantics(
       label:
           '${category.name}: ${formatBalance(category.balanceCents)} left'
           '${over ? ', overspent' : ''}, spent $spent of ${formatBalance(category.budgetedCents)}',
-      button: onTap != null,
+      button: true,
       excludeSemantics: true,
+      customSemanticsActions: _setBudgetAction(onEdit),
       child: Pressable(
-        onTap: onTap,
+        onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.sm),
           child: Row(
@@ -540,7 +568,7 @@ class _CategoryRow extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: Space.sm),
-                        _Budgeted(cents: category.budgetedCents, editable: onTap != null),
+                        _Budgeted(cents: category.budgetedCents, onEdit: onEdit),
                       ],
                     ),
                   ],
@@ -559,19 +587,21 @@ class _CategoryRow extends StatelessWidget {
 class _UnusedCategoryRow extends StatelessWidget {
   final String name;
   final String? emoji;
-  final VoidCallback? onTap;
+  final VoidCallback onOpen;
+  final VoidCallback? onEdit;
 
-  const _UnusedCategoryRow({required this.name, this.emoji, this.onTap});
+  const _UnusedCategoryRow({required this.name, this.emoji, required this.onOpen, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
     final muted = context.colors.onSurfaceVariant;
     return Semantics(
       label: '$name: nothing budgeted',
-      button: onTap != null,
+      button: true,
       excludeSemantics: true,
+      customSemanticsActions: _setBudgetAction(onEdit),
       child: Pressable(
-        onTap: onTap,
+        onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.sm),
           child: Row(
@@ -587,8 +617,8 @@ class _UnusedCategoryRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: Space.md),
-              if (onTap != null)
-                const _Budgeted(cents: 0, editable: true)
+              if (onEdit != null)
+                _Budgeted(cents: 0, onEdit: onEdit)
               else
                 Text(formatBalance(0), style: figures(context.text.bodySmall).copyWith(color: muted)),
             ],
@@ -599,58 +629,81 @@ class _UnusedCategoryRow extends StatelessWidget {
   }
 }
 
+/// The row's own action hides the inner one from screen readers: offer it here.
+Map<CustomSemanticsAction, VoidCallback>? _setBudgetAction(VoidCallback? onEdit) =>
+    onEdit == null ? null : {const CustomSemanticsAction(label: 'Set budget'): onEdit};
+
 class _Budgeted extends StatelessWidget {
   final int cents;
-  final bool editable;
 
-  const _Budgeted({required this.cents, required this.editable});
+  /// Null when the amounts are Actual's (read-only here).
+  final VoidCallback? onEdit;
+
+  const _Budgeted({required this.cents, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final small = figures(context.text.bodySmall);
-    if (!editable) return Text('of ${formatBalance(cents)}', style: small.copyWith(color: colors.onSurfaceVariant));
-    // Plain words when unset: there can be twenty of these on a screen, and
-    // the accent stays rare.
-    if (cents == 0) return Text('Set budget', style: context.text.bodySmall?.copyWith(color: colors.primary));
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: colors.outlineVariant),
+    final edit = onEdit;
+    if (edit == null) return Text('of ${formatBalance(cents)}', style: small.copyWith(color: colors.onSurfaceVariant));
+    // Its own tap, separate from the row's, with room around it for a finger.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: edit,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(Space.md, Space.xs, 0, Space.xs),
+        child: cents == 0
+            // Plain words when unset: there can be twenty of these on a screen,
+            // and the accent stays rare.
+            ? Text('Set budget', style: context.text.bodySmall?.copyWith(color: colors.primary))
+            : Container(
+                padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: colors.outlineVariant),
+                ),
+                child: Text(formatBalance(cents), style: small.copyWith(color: colors.onSurface)),
+              ),
       ),
-      child: Text(formatBalance(cents), style: small.copyWith(color: colors.onSurface)),
     );
   }
 }
 
 class _IncomeSection extends StatelessWidget {
   final List<({String id, String name, int receivedCents, String? emoji})> income;
+  final void Function(String id, String name) onOpen;
 
-  const _IncomeSection({required this.income});
+  const _IncomeSection({required this.income, required this.onOpen});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(Space.gutter, Space.lg, Space.gutter, 0),
+      padding: const EdgeInsets.only(top: Space.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Income', style: context.text.titleSmall),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+            child: Text('Income', style: context.text.titleSmall),
+          ),
           const SizedBox(height: Space.sm),
           for (final i in income)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: Space.xs + 2),
-              child: Row(
-                children: [
-                  CategoryGlyph(emoji: i.emoji, name: i.name),
-                  const SizedBox(width: CategoryGlyph.gap),
-                  Expanded(child: Text(i.name, style: context.text.bodyLarge)),
-                  Text(
-                    formatCents(i.receivedCents),
-                    style: figures(context.text.bodyLarge).copyWith(color: context.tokens.inflow),
-                  ),
-                ],
+            Pressable(
+              onTap: () => onOpen(i.id, i.name),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Space.gutter, vertical: Space.xs + 2),
+                child: Row(
+                  children: [
+                    CategoryGlyph(emoji: i.emoji, name: i.name),
+                    const SizedBox(width: CategoryGlyph.gap),
+                    Expanded(child: Text(i.name, style: context.text.bodyLarge)),
+                    Text(
+                      formatCents(i.receivedCents),
+                      style: figures(context.text.bodyLarge).copyWith(color: context.tokens.inflow),
+                    ),
+                  ],
+                ),
               ),
             ),
         ],

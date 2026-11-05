@@ -7,6 +7,7 @@ import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local/ledger_store.dart';
+import '../../../data/models/actual_category.dart';
 import '../../../data/models/quick_add.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
@@ -17,6 +18,7 @@ import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/inline_note.dart';
 import '../../../shared/widgets/labeled_field.dart';
 import '../../accounts/widgets/account_sheet.dart';
+import '../../accounts/widgets/other_account_field.dart';
 import '../quick_add_controller.dart';
 
 const _log = AppLog('quick-add');
@@ -98,7 +100,23 @@ class _QuickAddFormState extends ConsumerState<_QuickAddForm> {
     final groups = widget.options.categoryGroups
         .where((g) => widget.options.incomeGroupIds.contains(g.id) == income)
         .toList();
-    final choice = await pickCategory(context, groups.isEmpty ? widget.options.categoryGroups : groups);
+    // These aren't income or spending, so they're offered on both.
+    final notCounted = widget.options.notCountedCategoryIds;
+    final shown = [
+      for (final g in widget.options.categoryGroups)
+        if (groups.contains(g))
+          g
+        else if (g.categories.any((c) => notCounted.contains(c.id)))
+          ActualCategoryGroup(
+            id: g.id,
+            name: g.name,
+            categories: [
+              for (final c in g.categories)
+                if (notCounted.contains(c.id)) c,
+            ],
+          ),
+    ];
+    final choice = await pickCategory(context, shown.isEmpty ? widget.options.categoryGroups : shown);
     if (choice != null) _controller.setCategory(choice.id, choice.name);
   }
 
@@ -211,6 +229,19 @@ class _QuickAddFormState extends ConsumerState<_QuickAddForm> {
                   },
                 ),
               ),
+              if (options.betweenAccountsCategoryIds.contains(state.categoryId) && options.accounts.length > 1) ...[
+                const SizedBox(height: Space.lg),
+                OtherAccountField(
+                  income: state.income,
+                  accounts: options.accounts,
+                  accountId: state.accountId,
+                  value: state.otherAccountId,
+                  onChanged: (id) => _controller.setOtherAccount(
+                    id,
+                    options.accounts.where((a) => a.id == id).firstOrNull?.name,
+                  ),
+                ),
+              ],
               const SizedBox(height: Space.lg),
               LabeledField(
                 label: 'Date',

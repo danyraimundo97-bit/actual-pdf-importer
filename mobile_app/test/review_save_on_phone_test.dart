@@ -236,6 +236,104 @@ void main() {
       await finish(tester);
     });
 
+    group('a line with the same date and amount as a saved transaction', () {
+      Future<(LedgerStore, String)> seeded(WidgetTester tester) async {
+        final store = LedgerStore(db);
+        final id = (await tester.runAsync(() async {
+          final id = await store.createAccount(phoneScope, name: 'Checking');
+          await store.addTransactions(id, [
+            LedgerDraft(date: DateTime(2026, 10, 3), amountCents: -1230, payee: 'Quick coffee', importedId: 'app-1'),
+          ]);
+          return id;
+        }))!;
+        return (store, id);
+      }
+
+      Future<Set<String?>> ids(WidgetTester tester, LedgerStore store, String account) async => {
+        for (final t in (await tester.runAsync(() => store.transactions(account)))!) t.importedId,
+      };
+
+      final lines = [tx('SHOP', -1230, 'pdfimport-a'), tx('CAFE', -250, 'pdfimport-b')];
+
+      testWidgets('asks; "same" skips that line and saves the rest', (tester) async {
+        final (store, id) = await seeded(tester);
+        final popped = await pumpReview(tester, lines);
+        await tester.tap(find.text('Save 2 transactions'));
+        await settle(tester);
+
+        expect(find.text('Is this already saved?'), findsOneWidget);
+        expect(find.textContaining('Quick coffee'), findsOneWidget);
+        await tester.tap(find.text('Continue'));
+        await settle(tester);
+        await tester.tap(find.text('Done'));
+        await settle(tester);
+
+        expect(await ids(tester, store, id), {'app-1', 'pdfimport-b'});
+        expect((popped.single!.added, popped.single!.updated), (1, 1));
+        await finish(tester);
+      });
+
+      testWidgets('"different" adds it too', (tester) async {
+        final (store, id) = await seeded(tester);
+        await pumpReview(tester, lines);
+        await tester.tap(find.text('Save 2 transactions'));
+        await settle(tester);
+        await tester.tap(find.text('Different, add it'));
+        await tester.pump();
+        await tester.tap(find.text('Continue'));
+        await settle(tester);
+
+        expect(await ids(tester, store, id), {'app-1', 'pdfimport-a', 'pdfimport-b'});
+        await finish(tester);
+      });
+
+      testWidgets('Cancel saves nothing and stays on the review', (tester) async {
+        final (store, id) = await seeded(tester);
+        final popped = await pumpReview(tester, lines);
+        await tester.tap(find.text('Save 2 transactions'));
+        await settle(tester);
+        await tester.tap(find.text('Cancel'));
+        await settle(tester);
+
+        expect(await ids(tester, store, id), {'app-1'});
+        expect(popped, isEmpty);
+        expect(find.text('Save 2 transactions'), findsOneWidget);
+        await finish(tester);
+      });
+
+      testWidgets('importing into Actual asks too', (tester) async {
+        const budget = 'budget-1';
+        final store = LedgerStore(db);
+        await tester.runAsync(() async {
+          await db
+              .into(db.ledgerAccounts)
+              .insert(LedgerAccountsCompanion.insert(id: 'chk', scope: budget, name: 'Checking', sort: 0, updatedAt: 0));
+          await db
+              .into(db.ledgerSyncState)
+              .insert(LedgerSyncStateCompanion.insert(scope: budget, lastPulledAt: const Value(1)));
+          await store.addTransactions('chk', [
+            LedgerDraft(date: DateTime(2026, 10, 3), amountCents: -1230, payee: 'From a notification', importedId: 'app-1'),
+          ]);
+        });
+        await pumpReview(
+          tester,
+          [tx('SHOP', -1230, 'pdfimport-a')],
+          actualAccount: const ActualAccount(id: 'chk', name: 'Checking', offbudget: false, closed: false),
+          budgetSyncId: budget,
+        );
+        await tester.tap(find.text('Import 1 transaction'));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+        await settle(tester);
+
+        expect(find.text('Is this already saved?'), findsOneWidget);
+        await tester.tap(find.text('Continue'));
+        await settle(tester);
+        expect(await ids(tester, store, 'chk'), {'app-1'});
+        await finish(tester);
+      });
+    });
+
     testWidgets('with no account yet, one is added from the picker', (tester) async {
       await pumpReview(tester, [tx('SHOP', -1230, 'pdfimport-a')]);
       expect(find.text('Choose an account to save into'), findsOneWidget);

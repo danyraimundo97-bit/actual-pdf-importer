@@ -163,6 +163,16 @@ MonthTransactions buildMonthTransactions({
       spendingIds.add(row);
     }
   }
+  // Without notCounted: opening a category that doesn't count still lists
+  // what's in it.
+  final categoryCents = <String, Map<String, int>>{};
+  for (final f in _flows(accounts, transactions)) {
+    final category = f.categoryId;
+    if (category == null || _month(f.date) != month) continue;
+    final shares = categoryCents[category] ??= {};
+    final row = parentOf[f.id] ?? f.id;
+    shares[row] = (shares[row] ?? 0) + f.amountCents;
+  }
   final accountNames = {for (final a in accounts) a.id: a.name};
   final rows = shaped.top.where((t) => _month(t.date) == month).toList()
     ..sort((a, b) {
@@ -177,6 +187,7 @@ MonthTransactions buildMonthTransactions({
     spendingCents: spending,
     incomeIds: incomeIds,
     spendingIds: spendingIds,
+    categoryCents: categoryCents,
     transactions: [
       for (final t in rows)
         AccountTransaction(
@@ -234,6 +245,7 @@ Dashboard buildLedgerDashboard({
   required DateTime today,
   int months = 6,
   Set<String> notCounted = const {},
+  Set<String> notInBalances = const {},
 }) {
   final open = [
     for (final a in accounts)
@@ -250,6 +262,7 @@ Dashboard buildLedgerDashboard({
   // included.
   final balances = <String, int>{};
   for (final t in top) {
+    if (notInBalances.contains(t.categoryId)) continue;
     balances[t.accountId] = (balances[t.accountId] ?? 0) + t.amountCents;
   }
   final dashAccounts = [

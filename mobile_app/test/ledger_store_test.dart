@@ -251,4 +251,82 @@ void main() {
     final id = await ledger.createAccount(phoneScope, name: 'Checking', openingBalanceCents: 100);
     expect(await ledger.openingBalance(id), 100);
   });
+
+  group('possibleDuplicates', () {
+    Future<String> account() => store.createAccount(phoneScope, name: 'Checking', openingBalanceCents: -2000);
+
+    test('finds a row with the same date and amount under another id', () async {
+      final id = await account();
+      await store.addTransactions(id, [draft('2026-10-01', -2000, payee: 'Coffee', importedId: 'app-1')]);
+      final found = await store.possibleDuplicates(id, [
+        draft('2026-10-01', -2000, payee: 'CAFE LDA', importedId: 'pdfimport-a'),
+        draft('2026-10-02', -2000, importedId: 'pdfimport-b'),
+        draft('2026-10-01', -2001, importedId: 'pdfimport-c'),
+      ]);
+      expect(found.map((d) => d.line), [0]);
+      expect(found.single.existingPayee, 'Coffee');
+    });
+
+    test('a line the account has by importedId is not a question: it is skipped for certain', () async {
+      final id = await account();
+      await store.addTransactions(id, [draft('2026-10-01', -2000, importedId: 'pdfimport-a')]);
+      expect(await store.possibleDuplicates(id, [draft('2026-10-01', -2000, importedId: 'pdfimport-a')]), isEmpty);
+    });
+
+    test('each saved row answers for one line', () async {
+      final id = await account();
+      await store.addTransactions(id, [draft('2026-10-01', -2000, importedId: 'app-1')]);
+      final found = await store.possibleDuplicates(id, [
+        draft('2026-10-01', -2000, importedId: 'pdfimport-a'),
+        draft('2026-10-01', -2000, importedId: 'pdfimport-b'),
+      ]);
+      expect(found.map((d) => d.line), [0]);
+    });
+
+    test('other accounts, removed rows and the opening balance do not count', () async {
+      final id = await store.createAccount(phoneScope, name: 'Checking', openingBalanceCents: -2000, openedOn: DateTime(2026, 10, 1));
+      final other = await store.createAccount(phoneScope, name: 'Other');
+      await store.addTransactions(other, [draft('2026-10-01', -2000, importedId: 'app-1')]);
+      final removed = await store.addTransaction(id, draft('2026-10-05', -700, importedId: 'app-2'));
+      await store.deleteTransaction(removed!);
+      expect(
+        await store.possibleDuplicates(id, [
+          draft('2026-10-01', -2000, importedId: 'pdfimport-a'),
+          draft('2026-10-05', -700, importedId: 'pdfimport-b'),
+        ]),
+        isEmpty,
+      );
+    });
+  });
+
+  group('addBetweenAccounts', () {
+    test('both balances move, net worth does not; each note names the other', () async {
+      final a = await store.createAccount(phoneScope, name: 'Moey', openingBalanceCents: 10000);
+      final b = await store.createAccount(phoneScope, name: 'Activo', openingBalanceCents: 5000);
+      await store.addBetweenAccounts(a, b, draft('2026-10-01', -2000, categoryId: 'c', importedId: 'app-1'));
+
+      final balances = {for (final v in await accounts()) v.account.name: v.balanceCents};
+      expect(balances, {'Moey': 8000, 'Activo': 7000});
+      Future<LedgerTransaction> row(String id) async =>
+          (await store.transactions(id)).firstWhere((t) => t.date == '2026-10-01');
+      expect(((await row(a)).amountCents, (await row(a)).notes), (-2000, 'To: Activo'));
+      expect(((await row(b)).amountCents, (await row(b)).notes), (2000, 'From: Moey'));
+    });
+
+    test('a retry adds nothing more', () async {
+      final a = await store.createAccount(phoneScope, name: 'Moey');
+      final b = await store.createAccount(phoneScope, name: 'Activo');
+      final d = draft('2026-10-01', -2000, importedId: 'app-1');
+      await store.addBetweenAccounts(a, b, d);
+      await store.addBetweenAccounts(a, b, d);
+      expect((await store.transactions(a)).length, 1);
+      expect((await store.transactions(b)).length, 1);
+    });
+
+    test('the same account on both sides is refused', () async {
+      final a = await store.createAccount(phoneScope, name: 'Moey');
+      await expectLater(store.addBetweenAccounts(a, a, draft('2026-10-01', -1)), throwsStateError);
+      expect(await store.transactions(a), isEmpty);
+    });
+  });
 }

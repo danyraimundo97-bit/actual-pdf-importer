@@ -38,6 +38,12 @@ class SettingsStore {
   Future<void> setLastLedgerAccountFor(String bankId, String accountId) =>
       _prefs.setString('$_kLastLedgerAccountPrefix$bankId', accountId);
 
+  /// The account a notification from this app starts on. Null: no default.
+  String? defaultAccountForApp(String package) => _prefs.getString('notification_account_$package');
+  Future<void> setDefaultAccountForApp(String package, String? accountId) => accountId == null
+      ? _prefs.remove('notification_account_$package')
+      : _prefs.setString('notification_account_$package', accountId);
+
   /// Null for installs from before the setup guide existed; AppConfig
   /// derives a value from the connection settings in that case.
   bool? get onboarded => _prefs.getBool(_kOnboarded);

@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/api_exception.dart';
 import '../../../core/format/dates.dart';
+import '../../../core/log/app_log.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/category_memory_source.dart';
+import '../../../data/ledger_sync_controller.dart';
+import '../../../data/local/ledger_store.dart';
 import '../category_sync_controller.dart';
 import '../../../data/models/actual_account.dart';
 import '../../../data/models/actual_category.dart';
@@ -16,6 +19,8 @@ import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/labeled_field.dart';
 import '../../../shared/widgets/sheet_body.dart';
 import '../../../shared/widgets/skeleton.dart';
+
+const _log = AppLog('categories');
 
 class CategoryMemoryScreen extends ConsumerStatefulWidget {
   const CategoryMemoryScreen({super.key});
@@ -123,9 +128,63 @@ class _CategoryMemoryScreenState extends ConsumerState<CategoryMemoryScreen> {
     try {
       await source.upsert(payee: result.payee, categoryId: result.categoryId, categoryName: result.categoryName);
       await _load();
+      await _offerToMoveExisting(source, result.payee, result.categoryId, result.categoryName);
     } on ApiException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }
+  }
+
+  /// A mapping only decides future statement lines, so a payee's transactions
+  /// already here stay where they are unless the user says otherwise. Asked
+  /// each time a mapping is saved, also when its category didn't change.
+  Future<void> _offerToMoveExisting(
+    CategoryMemorySource source,
+    String payee,
+    String categoryId,
+    String? categoryName,
+  ) async {
+    final scope = await ref.read(ledgerScopeProvider.future);
+    // The phone's category ids must never land on a copy of an Actual budget
+    // (offline, the memory on screen is the phone's while the budget is Actual's).
+    if (source.isLocal != (scope == phoneScope)) return;
+    final store = ref.read(ledgerStoreProvider);
+    final previous = await store.payeeRowsOutside(scope, payee, categoryId);
+    if (previous.isEmpty || !mounted) return;
+    final count = previous.length;
+    final name = categoryName ?? 'this category';
+    final move = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Move existing transactions too?'),
+        content: Text(
+          '$count ${count == 1 ? 'transaction' : 'transactions'} from $payee '
+          '${count == 1 ? 'is' : 'are'} in another category. Move ${count == 1 ? 'it' : 'them'} to $name? '
+          'Home and Budget will update${scope == phoneScope ? '' : ', and so will Actual'}.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Only future ones')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text('Move $count')),
+        ],
+      ),
+    );
+    if (move != true) return;
+    await store.setCategories({for (final id in previous.keys) id: categoryId});
+    final sync = ref.read(ledgerSyncProvider.notifier);
+    sync.request(delay: Duration.zero);
+    _log.info('Payee transactions moved', {'count': count});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Moved $count to $name.'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            await store.setCategories(previous);
+            sync.request(delay: Duration.zero);
+          },
+        ),
+      ),
+    );
   }
 
   /// Forgets every mapping of the current budget, after confirmation. No

@@ -37,6 +37,10 @@ class QuickAddState {
   /// then no longer overwrites it.
   final bool categoryChosen;
   final String? accountId;
+
+  /// The other side, for money between your own accounts. Optional.
+  final String? otherAccountId;
+  final String? otherAccountName;
   final DateTime date;
   final String notes;
   final bool saving;
@@ -54,6 +58,8 @@ class QuickAddState {
     this.categoryName,
     this.categoryChosen = false,
     this.accountId,
+    this.otherAccountId,
+    this.otherAccountName,
     required this.date,
     this.notes = '',
     this.saving = false,
@@ -83,7 +89,12 @@ class QuickAddState {
     String? error,
     bool clearCategory = false,
     bool clearError = false,
+    String? otherAccountId,
+    String? otherAccountName,
+    bool clearOtherAccount = false,
   }) {
+    final categoryChanged = clearCategory || (categoryId != null && categoryId != this.categoryId);
+    final dropOther = clearOtherAccount || categoryChanged || (accountId != null && accountId == this.otherAccountId);
     return QuickAddState(
       amountText: amountText ?? this.amountText,
       income: income ?? this.income,
@@ -92,6 +103,8 @@ class QuickAddState {
       categoryName: clearCategory ? null : (categoryName ?? this.categoryName),
       categoryChosen: categoryChosen ?? this.categoryChosen,
       accountId: accountId ?? this.accountId,
+      otherAccountId: dropOther ? otherAccountId : (otherAccountId ?? this.otherAccountId),
+      otherAccountName: dropOther ? otherAccountName : (otherAccountName ?? this.otherAccountName),
       date: date ?? this.date,
       notes: notes ?? this.notes,
       saving: saving ?? this.saving,
@@ -155,6 +168,10 @@ class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
 
   void setAccount(String id) => state = state.copyWith(accountId: id, clearError: true);
 
+  void setOtherAccount(String? id, String? name) => state = id == null
+      ? state.copyWith(clearOtherAccount: true)
+      : state.copyWith(otherAccountId: id, otherAccountName: name);
+
   void setDate(DateTime date) => state = state.copyWith(date: date, clearError: true);
 
   void setNotes(String notes) => state = state.copyWith(notes: notes);
@@ -171,17 +188,18 @@ class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
     final categoryId = state.categoryId;
     final store = ref.read(ledgerStoreProvider);
     try {
-      final id = await store.addTransaction(
-        accountId,
-        LedgerDraft(
+      final draft = LedgerDraft(
           date: state.date,
           amountCents: amountCents,
           payee: payee.isEmpty ? null : payee,
           categoryId: categoryId,
           notes: state.notes.trim().isEmpty ? null : state.notes.trim(),
           importedId: 'app-${state.clientId}',
-        ),
       );
+      final other = state.otherAccountId;
+      final id = other == null
+          ? await store.addTransaction(accountId, draft)
+          : await store.addBetweenAccounts(accountId, other, draft);
       _log.info('Transaction saved', {'accountId': accountId, 'id': id, 'created': id != null});
       await ref.read(settingsStoreProvider).setLastAccountId(accountId);
       // With Actual the backend learns this when the row arrives; here it's

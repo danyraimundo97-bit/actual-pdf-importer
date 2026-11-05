@@ -142,6 +142,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           SettingsGroup(
             children: [
               SettingsRow(
+                icon: Icons.notifications_active_outlined,
+                title: 'Bank notifications',
+                subtitle: switch (ref.watch(bankNotificationsWaitingProvider).valueOrNull?.length ?? 0) {
+                  0 => const Text('Add transactions from them'),
+                  1 => const Text('1 waiting'),
+                  final n => Text('$n waiting'),
+                },
+                onTap: () => context.push('/settings/bank-notifications'),
+              ),
+              SettingsRow(
                 icon: Icons.savings_outlined,
                 title: 'Budget style',
                 subtitle: switch (ref.watch(budgetStyleProvider).valueOrNull) {

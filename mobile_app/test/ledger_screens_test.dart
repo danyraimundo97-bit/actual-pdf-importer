@@ -14,6 +14,7 @@ import 'package:mobile_app/data/providers.dart';
 import 'package:mobile_app/features/accounts/screens/account_screen.dart';
 import 'package:mobile_app/features/budget/screens/budget_screen.dart';
 import 'package:mobile_app/features/dashboard/screens/dashboard_screen.dart';
+import 'package:mobile_app/shared/widgets/pressable.dart';
 
 // docs/plans/local-ledger.md, Phase 4: Home, Budget and the account screen
 // with no backend at all, read from the phone's own ledger.
@@ -86,7 +87,7 @@ void main() {
   });
 
   group('Budget', () {
-    testWidgets('tapping a category sets its amount for the month', (tester) async {
+    testWidgets('tapping a category\'s amount sets it for the month', (tester) async {
       await run(tester, () async {
         final id = await store.createAccount(phoneScope, name: 'Checking');
         await store.addTransactions(id, [
@@ -96,7 +97,9 @@ void main() {
       await pump(tester, const BudgetScreen());
       expect(find.text('Kept on this phone'), findsOneWidget);
 
-      await tester.tap(find.text('Groceries'));
+      await tester.tap(
+        find.descendant(of: find.ancestor(of: find.text('Groceries'), matching: find.byType(Pressable)).first, matching: find.text('Set budget')),
+      );
       await settle(tester);
       await tester.enterText(find.byType(TextField), '250');
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));

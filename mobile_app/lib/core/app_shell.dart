@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../features/bank_notifications/widgets/bank_notification_sheet.dart';
 
 import '../data/ledger_sync_controller.dart';
 import '../data/providers.dart';
@@ -29,6 +32,7 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell> {
   final _shareService = ShareIntentService();
+  StreamSubscription<String>? _bankOpened;
 
   @override
   void initState() {
@@ -37,6 +41,16 @@ class _AppShellState extends ConsumerState<AppShell> {
       if (pdf != null) _receive(pdf);
     });
     _shareService.listen(_receive);
+    final bank = ref.read(bankNotificationsProvider);
+    _bankOpened = bank.opened.listen(_openBankNotification);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final opened = await bank.takeOpened();
+      if (opened != null) {
+        await _openBankNotification(opened);
+      } else {
+        await _mentionBankNotifications();
+      }
+    });
     if (ref.read(databaseWasResetProvider)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _explainDatabaseReset());
     }
@@ -62,8 +76,30 @@ class _AppShellState extends ConsumerState<AppShell> {
     ref.read(databaseWasResetProvider.notifier).state = false;
   }
 
+  /// One of our notifications was tapped: its pop-up.
+  Future<void> _openBankNotification(String id) async {
+    final waiting = await ref.read(bankNotificationsProvider).list();
+    final notification = waiting.where((n) => n.id == id).firstOrNull;
+    if (notification == null || !mounted) return;
+    await showBankNotificationSheet(context, notification);
+    ref.invalidate(bankNotificationsWaitingProvider);
+  }
+
+  /// Opening the app without tapping one: a mention, not a pop-up.
+  Future<void> _mentionBankNotifications() async {
+    final count = (await ref.read(bankNotificationsProvider).list()).length;
+    if (count == 0 || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(count == 1 ? '1 bank notification to add.' : '$count bank notifications to add.'),
+        action: SnackBarAction(label: 'Review', onPressed: () => context.push('/settings/bank-notifications')),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _bankOpened?.cancel();
     _shareService.dispose();
     super.dispose();
   }

@@ -1,3 +1,4 @@
+import '../features/bank_notifications/bank_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -308,6 +309,14 @@ final monthTransactionsProvider = FutureProvider.autoDispose.family<MonthTransac
   ref.watch(ledgerChangesProvider);
   return ref.watch(ledgerReportsProvider).monthTransactions(scope, month);
 });
+
+/// The Android side of listening to bank apps.
+final bankNotificationsProvider = Provider<BankNotificationsChannel>((ref) => BankNotificationsChannel());
+
+/// Bank notifications not yet added or dismissed.
+final bankNotificationsWaitingProvider = FutureProvider.autoDispose<List<BankNotification>>(
+  (ref) => ref.watch(bankNotificationsProvider).list(),
+);
 
 /// The style of the budget on screen: the phone's own choice, or what the last
 /// pull said about Actual's.

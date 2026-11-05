@@ -202,6 +202,34 @@ void main() {
     expect(c.read(quickAddControllerProvider).amountText, '4,50');
   });
 
+  test('the other account gets the opposite amount, and is dropped when the category changes', () async {
+    final (c, db, _) = await _container(connected: false);
+    final store = LedgerStore(db);
+    final wallet = await store.createAccount(phoneScope, name: 'Wallet');
+    final moey = await store.createAccount(phoneScope, name: 'Moey');
+    final options = await c.read(quickAddOptionsProvider.future);
+    const between = 'preset:money.between_accounts';
+    expect(options.notCountedCategoryIds, contains(between));
+
+    final controller = c.read(quickAddControllerProvider.notifier)..applyOptions(options);
+    controller.setAccount(wallet);
+    controller.setAmount('20');
+    controller.setIncome(true);
+    controller.setCategory(between, 'Between my accounts');
+    controller.setOtherAccount(moey, 'Moey');
+    expect(c.read(quickAddControllerProvider).otherAccountName, 'Moey');
+    controller.setCategory('preset:food.groceries', 'Groceries');
+    expect(c.read(quickAddControllerProvider).otherAccountName, isNull);
+
+    controller.setCategory(between, 'Between my accounts');
+    controller.setOtherAccount(moey, 'Moey');
+    controller.setNotes('rent');
+    expect(await controller.save(), isTrue);
+    expect((await store.transactions(wallet)).single.notes, 'From: Moey · rent');
+    final mirror = (await store.transactions(moey)).single;
+    expect((mirror.amountCents, mirror.notes, mirror.categoryId), (-2000, 'To: Wallet · rent', between));
+  });
+
   test("without Actual it offers the phone's accounts and categories, and saves there", () async {
     final (c, db, _) = await _container(connected: false);
     final store = LedgerStore(db);

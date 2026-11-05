@@ -14,6 +14,7 @@ import 'package:mobile_app/data/local/ledger_store.dart';
 import 'package:mobile_app/data/models/account_page.dart';
 import 'package:mobile_app/data/providers.dart';
 import 'package:mobile_app/features/accounts/screens/account_screen.dart';
+import 'package:mobile_app/features/budget/screens/budget_screen.dart';
 import 'package:mobile_app/features/budget/screens/month_transactions_screen.dart';
 import 'package:mobile_app/features/dashboard/screens/dashboard_screen.dart';
 
@@ -141,6 +142,45 @@ void main() {
       expect((await reports.budgetMonth(phoneScope, month)).totalSpentCents, -2450);
     });
 
+    test('a move with both sides: right balances, same net worth, nothing in the totals', () async {
+      final a = await store.createAccount(phoneScope, name: 'A', openingBalanceCents: 10000);
+      final b = await store.createAccount(phoneScope, name: 'B');
+      await store.addBetweenAccounts(a, b, LedgerDraft(date: today, amountCents: -3000, categoryId: between));
+      final home = await LedgerReports(db, store).dashboard(phoneScope);
+      expect({for (final x in home.accounts) x.name: x.balanceCents}, {'A': 7000, 'B': 3000});
+      expect(home.netWorthCents, 10000);
+      expect(home.months.last.incomeCents, 0);
+      expect(home.months.last.spendingCents, 0);
+    });
+
+    test('Not counted is left out everywhere: totals, balances and net worth, but still listed', () async {
+      const notCounted = 'preset:money.not_counted';
+      final a = await store.createAccount(phoneScope, name: 'A', openingBalanceCents: 10000);
+      await store.addTransactions(a, [
+        LedgerDraft(date: today, amountCents: -3000, payee: 'Ignored', categoryId: notCounted),
+        LedgerDraft(date: today, amountCents: -100, payee: 'Bakery', categoryId: groceries),
+      ]);
+      final reports = LedgerReports(db, store);
+
+      final home = await reports.dashboard(phoneScope);
+      expect(home.accounts.single.balanceCents, 9900);
+      expect(home.netWorthCents, 9900);
+      expect(home.months.last.spendingCents, 100);
+      expect((await store.watchAccounts(phoneScope).first).single.balanceCents, 9900);
+
+      final page = await reports.accountPage(a);
+      expect(page.balanceCents, 9900);
+      expect(page.transactions.map((t) => t.payee), contains('Ignored'));
+
+      final monthList = await reports.monthTransactions(phoneScope, month);
+      expect(monthList.spendingCents, 100);
+      expect(monthList.rowsInCategory(notCounted).single.payee, 'Ignored');
+      expect((await reports.budgetMonth(phoneScope, month)).totalSpentCents, -100);
+
+      // Setting the balance goes from the same figure.
+      expect(await store.setBalance(a, 9900, on: today), 0);
+    });
+
     test('a transaction outside the category still counts', () async {
       final reports = await seeded();
       final savings = (await store.accounts(phoneScope)).firstWhere((a) => a.name == 'Savings');
@@ -215,6 +255,115 @@ void main() {
     expect(find.text('Work'), findsNothing);
     expect(find.text('Moved'), findsNothing);
     expect(find.text('1 transaction'), findsOneWidget);
+    await finish(tester);
+  });
+
+  testWidgets('tapping a budget category lists its transactions; its amount still sets the budget', (tester) async {
+    final now = DateTime.now();
+    await run(tester, () async {
+      final id = await store.createAccount(phoneScope, name: 'Checking');
+      await store.addTransactions(id, [
+        LedgerDraft(date: now, amountCents: -4000, payee: 'Lidl', categoryId: 'preset:food.groceries'),
+        LedgerDraft(date: now, amountCents: -900, payee: 'Other shop', categoryId: 'preset:food.restaurants'),
+        LedgerDraft(date: now, amountCents: -7000, payee: 'Revolut', categoryId: 'preset:money.between_accounts'),
+        LedgerDraft(
+          date: DateTime(now.year, now.month - 1, 15),
+          amountCents: -111,
+          payee: 'Last month',
+          categoryId: 'preset:food.groceries',
+        ),
+      ]);
+    });
+    SharedPreferences.setMockInitialValues({'onboarded': true});
+    final prefs = await SharedPreferences.getInstance();
+    await tester.binding.setSurfaceSize(const Size(800, 4000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final router = GoRouter(
+      initialLocation: '/budget',
+      routes: [
+        GoRoute(
+          path: '/budget',
+          builder: (context, state) => const BudgetScreen(),
+          routes: [
+            GoRoute(
+              path: 'transactions',
+              builder: (context, state) => MonthTransactionsScreen(
+                month: state.uri.queryParameters['month'],
+                categoryId: state.uri.queryParameters['category'],
+                categoryName: state.uri.queryParameters['name'],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs), appDatabaseProvider.overrideWithValue(db)],
+        child: MaterialApp.router(theme: AppTheme.light(), routerConfig: router),
+      ),
+    );
+    await settle(tester);
+
+    await tester.tap(find.text('Groceries'));
+    await settle(tester);
+    expect(find.text('Lidl'), findsOneWidget);
+    expect(find.text('Other shop'), findsNothing);
+    expect(find.text('Last month'), findsNothing);
+    expect(find.text('1 transaction'), findsOneWidget);
+    expect(find.textContaining('Total ${formatCents(-4000)}'), findsOneWidget);
+
+    router.pop();
+    await settle(tester);
+    // A category that doesn't count still shows what's in it.
+    await tester.tap(find.text('Between my accounts'));
+    await settle(tester);
+    expect(find.text('Revolut'), findsOneWidget);
+
+    router.pop();
+    await settle(tester);
+    await tester.tap(find.text('Set budget').first);
+    await settle(tester);
+    expect(find.widgetWithText(FilledButton, 'Save'), findsOneWidget, reason: 'the amount sheet, not the list');
+    await finish(tester);
+  });
+
+  testWidgets('tapping a transaction changes its category; it leaves the filtered list, and Undo restores it', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    const groceries = 'preset:food.groceries';
+    late String account;
+    await run(tester, () async {
+      account = await store.createAccount(phoneScope, name: 'Checking');
+      await store.addTransactions(account, [
+        LedgerDraft(date: now, amountCents: -4000, payee: 'Revolut', categoryId: groceries),
+        LedgerDraft(date: now, amountCents: -900, payee: 'Lidl', categoryId: groceries),
+      ]);
+    });
+    Future<String?> categoryOf(String payee) => run(tester, () async {
+      final names = await store.payeeNames(phoneScope);
+      return (await store.transactions(account)).firstWhere((t) => names[t.payeeId] == payee).categoryId;
+    });
+
+    await pump(tester, MonthTransactionsScreen(month: month, categoryId: groceries, categoryName: 'Groceries'));
+    expect(find.text('2 transactions'), findsOneWidget);
+
+    await tester.tap(find.text('Revolut'));
+    await settle(tester);
+    await tester.tap(find.text('Between my accounts'));
+    await settle(tester);
+
+    expect(await categoryOf('Revolut'), 'preset:money.between_accounts');
+    expect(await categoryOf('Lidl'), groceries, reason: 'only the one tapped');
+    expect(find.text('Revolut'), findsNothing);
+    expect(find.text('1 transaction'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(await categoryOf('Revolut'), groceries);
+    expect(find.text('2 transactions'), findsOneWidget);
     await finish(tester);
   });
 

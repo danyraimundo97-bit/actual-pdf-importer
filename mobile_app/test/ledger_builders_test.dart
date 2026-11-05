@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/data/local/db/app_database.dart';
 import 'package:mobile_app/data/local/ledger_builders.dart';
+import 'package:mobile_app/data/models/account_page.dart';
 
 // docs/plans/local-ledger.md, Phase 4. The dashboard cases mirror
 // backend_app/src/__tests__/dashboard.test.ts, so the phone and the backend
@@ -267,6 +268,41 @@ void main() {
         today: october,
       );
       expect([for (final g in m.groups) g.id], ['g-food']);
+    });
+  });
+
+  group('buildMonthTransactions by category', () {
+    MonthTransactions month(List<LedgerTransaction> rows, {Set<String> notCounted = const {}}) => buildMonthTransactions(
+      month: '2026-09',
+      accounts: accounts,
+      transactions: rows,
+      categoryNames: const {'food': 'Food', 'fun': 'Fun', 'move': 'Between'},
+      categoryEmojis: const {},
+      payeeNames: const {},
+      notCounted: notCounted,
+    );
+
+    test('a split shows only its share, so a category adds up to its figure', () {
+      final result = month([
+        tx('chk', '2026-09-10', -1000, category: 'food', id: 'plain'),
+        tx('chk', '2026-09-11', -300, isParent: true, id: 'split'),
+        tx('chk', '2026-09-11', -200, category: 'food', parent: 'split', id: 's1'),
+        tx('chk', '2026-09-11', -100, category: 'fun', parent: 'split', id: 's2'),
+      ]);
+      expect({for (final r in result.rowsInCategory('food')) r.id: r.amountCents}, {'split': -200, 'plain': -1000});
+      expect({for (final r in result.rowsInCategory('fun')) r.id: r.amountCents}, {'split': -100});
+      expect(result.rowsInCategory('none'), isEmpty);
+    });
+
+    test('leaves out other months and transfers; a category that does not count still lists its rows', () {
+      final result = month([
+        tx('chk', '2026-08-31', -5, category: 'food', id: 'august'),
+        tx('chk', '2026-09-02', -6, category: 'food', transfer: 'x', id: 'transfer'),
+        tx('chk', '2026-09-03', -7, category: 'move', id: 'moved'),
+      ], notCounted: {'move'});
+      expect(result.rowsInCategory('food'), isEmpty);
+      expect(result.rowsInCategory('move').single.id, 'moved');
+      expect(result.spendingCents, 0);
     });
   });
 }

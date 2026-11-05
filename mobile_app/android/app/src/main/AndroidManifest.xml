@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Our own notification, when a bank app sends one. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="mobile_app"
         android:name="${applicationName}"
@@ -40,6 +42,17 @@
                 <data android:mimeType="application/pdf"/>
             </intent-filter>
         </activity>
+        <!-- Sees bank apps' notifications, once allowed in Android's settings
+             (BankNotificationListener.kt). -->
+        <service
+            android:name=".BankNotificationListener"
+            android:label="Bank transactions"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -52,6 +65,11 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- The apps to choose from in Settings › Bank notifications. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

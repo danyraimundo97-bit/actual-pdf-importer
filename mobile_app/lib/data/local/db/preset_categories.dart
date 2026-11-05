@@ -66,6 +66,8 @@ const presetGroups = <PresetGroup>[
     PresetCategory('money.transfers', 'Transfers', '💸'),
     // Doesn't count towards income, spending or the budget (LedgerReports).
     PresetCategory('money.between_accounts', 'Between my accounts', '🔁'),
+    // Doesn't count anywhere: not in the totals, balances or net worth.
+    PresetCategory('money.not_counted', 'Not counted', '🚫'),
   ]),
   PresetGroup('income', 'Income', [
     PresetCategory('income.salary', 'Salary', '💼'),

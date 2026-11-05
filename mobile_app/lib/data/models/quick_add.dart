@@ -12,11 +12,19 @@ class QuickAddOptions {
   /// Most recently used first.
   final List<RecentPayee> recentPayees;
 
+  /// Categories left out of the totals, which go with money in or out alike.
+  final Set<String> notCountedCategoryIds;
+
+  /// Money between your own accounts: these can name the other account.
+  final Set<String> betweenAccountsCategoryIds;
+
   const QuickAddOptions({
     required this.accounts,
     required this.categoryGroups,
     required this.incomeGroupIds,
     required this.recentPayees,
+    this.notCountedCategoryIds = const {},
+    this.betweenAccountsCategoryIds = const {},
   });
 
   factory QuickAddOptions.fromJson(Map<String, dynamic> json) {

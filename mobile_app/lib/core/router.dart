@@ -10,6 +10,7 @@ import '../features/accounts/screens/accounts_settings_screen.dart';
 import '../features/accounts/screens/account_screen.dart';
 import '../features/accounts/screens/move_accounts_screen.dart';
 import '../features/backups/screens/backups_screen.dart';
+import '../features/bank_notifications/screens/bank_notifications_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
 import '../features/budget/screens/month_transactions_screen.dart';
 import '../features/budget/screens/budget_style_screen.dart';
@@ -131,7 +132,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                 routes: [
                   GoRoute(
                     path: 'transactions',
-                    builder: (context, state) => MonthTransactionsScreen(month: state.uri.queryParameters['month']),
+                    builder: (context, state) => MonthTransactionsScreen(
+                      month: state.uri.queryParameters['month'],
+                      categoryId: state.uri.queryParameters['category'],
+                      categoryName: state.uri.queryParameters['name'],
+                    ),
                   ),
                 ],
               ),
@@ -170,6 +175,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                     path: 'category-list',
                     parentNavigatorKey: _rootNavigatorKey,
                     builder: (context, state) => const CategoriesScreen(),
+                  ),
+                  GoRoute(
+                    path: 'bank-notifications',
+                    parentNavigatorKey: _rootNavigatorKey,
+                    builder: (context, state) => const BankNotificationsScreen(),
                   ),
                   GoRoute(
                     path: 'backups',
