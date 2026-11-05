@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/api_exception.dart';
+import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log/app_log.dart';
@@ -12,19 +13,11 @@ import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../data/ledger_sync_controller.dart';
 import '../../../shared/widgets/ledger_status.dart';
+import '../../../shared/widgets/pressable.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../widgets/budget_amount_sheet.dart';
 
 const _log = AppLog('budget');
-
-const _months = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-/// "Nov 2026"-style label for `YYYY-MM`.
-String monthLabel(String yyyyMm) =>
-    '${_months[int.parse(yyyyMm.substring(5, 7)) - 1]} ${yyyyMm.substring(0, 4)}';
 
 /// `YYYY-MM` [delta] months away.
 String shiftMonth(String yyyyMm, int delta) {
@@ -44,8 +37,27 @@ class BudgetScreen extends ConsumerStatefulWidget {
 }
 
 class _BudgetScreenState extends ConsumerState<BudgetScreen> {
-  /// Null = the current month (the backend decides which that is).
+  /// Null = the current month.
   String? _month;
+
+  /// The month on screen stays there while the next one is read, so changing
+  /// month never flashes the skeleton.
+  BudgetMonth? _shown;
+
+  /// Which way the last month change went: 1 forward, -1 back.
+  int _direction = 1;
+
+  /// Groups folded away; kept per screen, so they stay folded across months.
+  final Set<String> _collapsed = {};
+
+  void _goTo(String month, String from) => setState(() {
+    _direction = month.compareTo(from) >= 0 ? 1 : -1;
+    _month = month;
+  });
+
+  void _toggle(String groupId) => setState(() {
+    if (!_collapsed.remove(groupId)) _collapsed.add(groupId);
+  });
 
   Future<void> _edit(String month, BudgetCategory category) async {
     final cents = await showBudgetAmountSheet(
@@ -78,41 +90,120 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   Widget build(BuildContext context) {
     final budget = ref.watch(budgetMonthProvider(_month));
     final onPhone = ref.watch(readsLedgerProvider).valueOrNull ?? false;
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: budget.when(
-            skipLoadingOnRefresh: true,
-            loading: () => const _BudgetSkeleton(),
-            error: (error, _) => isActualNotConnected(error)
-                ? const ConnectActualState(state: LinkState.noActual)
-                : ErrorRetry(
-                    title: 'Could not load the budget',
-                    message: error is ApiException ? error.message : 'Something unexpected went wrong.',
-                    onRetry: () => ref.invalidate(budgetMonthProvider(_month)),
-                  ),
-            data: (data) => RefreshIndicator(
-              onRefresh: () async {
-                await ref.read(ledgerSyncProvider.notifier).syncNow();
-                return ref.refresh(budgetMonthProvider(_month).future);
-              },
-              child: _BudgetBody(
-                data: data,
-                onMonth: (m) => setState(() => _month = m),
-                onPhone: onPhone,
-                onEdit: onPhone ? (c) => _edit(data.month, c) : null,
-                onCopyLastMonth: onPhone ? () => _copyLastMonth(data.month) : null,
+    _shown = budget.valueOrNull ?? _shown;
+    final data = _shown;
+
+    final Widget body;
+    if (budget.hasError && !budget.hasValue) {
+      final error = budget.error;
+      body = isActualNotConnected(error)
+          ? const ConnectActualState(state: LinkState.noActual)
+          : ErrorRetry(
+              title: 'Could not load the budget',
+              message: error is ApiException ? error.message : 'Something unexpected went wrong.',
+              onRetry: () => ref.invalidate(budgetMonthProvider(_month)),
+            );
+    } else if (data == null) {
+      body = const _BudgetSkeleton();
+    } else {
+      body = Column(
+        children: [
+          _MonthSwitcher(data: data, onMonth: (m) => _goTo(m, data.month)),
+          Expanded(
+            child: _MonthTransition(
+              month: data.month,
+              direction: _direction,
+              child: RefreshIndicator(
+                key: ValueKey(data.month),
+                onRefresh: () async {
+                  await ref.read(ledgerSyncProvider.notifier).syncNow();
+                  return ref.refresh(budgetMonthProvider(_month).future);
+                },
+                child: _BudgetBody(
+                  data: data,
+                  onPhone: onPhone,
+                  collapsed: _collapsed,
+                  onToggle: _toggle,
+                  onEdit: onPhone ? (c) => _edit(data.month, c) : null,
+                  onCopyLastMonth: onPhone ? () => _copyLastMonth(data.month) : null,
+                ),
               ),
             ),
           ),
+        ],
+      );
+    }
+    return Scaffold(body: SafeArea(bottom: false, child: body));
+  }
+}
+
+class _MonthSwitcher extends StatelessWidget {
+  final BudgetMonth data;
+  final ValueChanged<String> onMonth;
+
+  const _MonthSwitcher({required this.data, required this.onMonth});
+
+  @override
+  Widget build(BuildContext context) {
+    final canBack = data.month.compareTo(data.firstMonth) > 0;
+    final canForward = data.month.compareTo(data.lastMonth) < 0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.sm, Space.md, Space.sm, Space.xs),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Previous month',
+            onPressed: canBack ? () => onMonth(shiftMonth(data.month, -1)) : null,
+            icon: const Icon(Icons.chevron_left_rounded),
+          ),
+          Expanded(
+            child: Text(monthLabel(data.month), textAlign: TextAlign.center, style: context.text.titleMedium),
+          ),
+          IconButton(
+            tooltip: 'Next month',
+            onPressed: canForward ? () => onMonth(shiftMonth(data.month, 1)) : null,
+            icon: const Icon(Icons.chevron_right_rounded),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// The new month slides in a little from the side you moved toward while the
+/// old one fades, so you keep your place. A fade only under reduced motion.
+class _MonthTransition extends StatelessWidget {
+  final String month;
+  final int direction;
+  final Widget child;
+
+  const _MonthTransition({required this.month, required this.direction, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    return AnimatedSwitcher(
+      duration: Motion.small,
+      switchInCurve: Motion.easeOut,
+      switchOutCurve: Motion.easeOut,
+      transitionBuilder: (child, animation) {
+        final incoming = child.key == ValueKey(month);
+        if (!incoming || reduceMotion) return FadeTransition(opacity: animation, child: child);
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween(begin: Offset(0.06 * direction, 0), end: Offset.zero).animate(animation),
+            child: child,
+          ),
+        );
+      },
+      child: child,
     );
   }
 }
 
 class _BudgetBody extends StatelessWidget {
   final BudgetMonth data;
-  final ValueChanged<String> onMonth;
 
   /// Set for the phone's own budget: amounts can be changed here.
   final ValueChanged<BudgetCategory>? onEdit;
@@ -120,69 +211,45 @@ class _BudgetBody extends StatelessWidget {
 
   /// The phone's own budget (else a copy of the Actual one).
   final bool onPhone;
+  final Set<String> collapsed;
+  final ValueChanged<String> onToggle;
 
   const _BudgetBody({
     required this.data,
-    required this.onMonth,
     this.onPhone = false,
+    required this.collapsed,
+    required this.onToggle,
     this.onEdit,
     this.onCopyLastMonth,
   });
 
   @override
   Widget build(BuildContext context) {
-    final canBack = data.month.compareTo(data.firstMonth) > 0;
-    final canForward = data.month.compareTo(data.lastMonth) < 0;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       // Bottom: room for the quick-add button.
-      padding: const EdgeInsets.only(top: Space.lg, bottom: Space.xxl * 3),
+      padding: const EdgeInsets.only(top: Space.sm, bottom: Space.xxl * 3),
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: Space.sm),
-          child: Row(
-            children: [
-              IconButton(
-                tooltip: 'Previous month',
-                onPressed: canBack ? () => onMonth(shiftMonth(data.month, -1)) : null,
-                icon: const Icon(Icons.chevron_left_rounded),
-              ),
-              Expanded(
-                child: Text(monthLabel(data.month), textAlign: TextAlign.center, style: context.text.titleLarge),
-              ),
-              IconButton(
-                tooltip: 'Next month',
-                onPressed: canForward ? () => onMonth(shiftMonth(data.month, 1)) : null,
-                icon: const Icon(Icons.chevron_right_rounded),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: Space.lg),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
           child: _Summary(data: data),
         ),
-        ...[
-          const SizedBox(height: Space.md),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
-            child: Row(
-              children: [
-                Expanded(child: LedgerStatus(onPhone: onPhone)),
-                if (onCopyLastMonth != null &&
-                    data.totalBudgetedCents == 0 &&
-                    data.month.compareTo(data.firstMonth) > 0)
-                  TextButton.icon(
-                    onPressed: onCopyLastMonth,
-                    icon: const Icon(Icons.content_copy_rounded, size: 16),
-                    label: const Text('Copy last month'),
-                  ),
-              ],
-            ),
+        const SizedBox(height: Space.md),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+          child: Row(
+            children: [
+              Expanded(child: LedgerStatus(onPhone: onPhone)),
+              if (onCopyLastMonth != null && data.totalBudgetedCents == 0 && data.month.compareTo(data.firstMonth) > 0)
+                TextButton.icon(
+                  onPressed: onCopyLastMonth,
+                  icon: const Icon(Icons.content_copy_rounded, size: 16),
+                  label: const Text('Copy last month'),
+                ),
+            ],
           ),
-        ],
-        const SizedBox(height: Space.xl),
+        ),
+        const SizedBox(height: Space.lg),
         if (data.groups.isEmpty)
           Padding(
             padding: const EdgeInsets.all(Space.gutter),
@@ -191,7 +258,13 @@ class _BudgetBody extends StatelessWidget {
               style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
             ),
           ),
-        for (final group in data.groups) _GroupSection(group: group, onEdit: onEdit),
+        for (final group in data.groups)
+          _GroupSection(
+            group: group,
+            open: !collapsed.contains(group.id),
+            onToggle: () => onToggle(group.id),
+            onEdit: onEdit,
+          ),
         if (data.income.isNotEmpty) _IncomeSection(income: data.income),
       ],
     );
@@ -209,19 +282,19 @@ class _Summary extends StatelessWidget {
     final muted = context.text.bodySmall?.copyWith(color: colors.onSurfaceVariant);
     final toBudget = data.toBudgetCents;
     Widget stat(String label, int cents, {Color? color}) => Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: muted),
-              const SizedBox(height: 2),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(formatCents(cents), style: figures(context.text.titleMedium).copyWith(color: color)),
-              ),
-            ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: muted),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(formatBalance(cents), style: figures(context.text.titleMedium).copyWith(color: color)),
           ),
-        );
+        ],
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -242,11 +315,10 @@ class _Summary extends StatelessWidget {
                 ),
               ),
               Text(
-                formatCents(toBudget),
-                style: figures(context.text.titleMedium).copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: toBudget < 0 ? colors.onErrorContainer : colors.primary,
-                ),
+                formatBalance(toBudget),
+                style: figures(
+                  context.text.titleMedium,
+                ).copyWith(fontWeight: FontWeight.w600, color: toBudget < 0 ? colors.onErrorContainer : colors.primary),
               ),
             ],
           ),
@@ -266,45 +338,48 @@ class _Summary extends StatelessWidget {
   }
 }
 
-class _GroupSection extends StatefulWidget {
-  final BudgetGroup group;
-  final ValueChanged<BudgetCategory>? onEdit;
-
-  const _GroupSection({required this.group, this.onEdit});
-
-  @override
-  State<_GroupSection> createState() => _GroupSectionState();
+/// What's been used of what was available, 0..1.
+double _usedOf(int spentCents, int balanceCents) {
+  final spent = -spentCents;
+  final available = spent + balanceCents;
+  if (spent <= 0) return 0;
+  if (available <= 0) return 1;
+  return (spent / available).clamp(0, 1).toDouble();
 }
 
-class _GroupSectionState extends State<_GroupSection> {
-  bool _open = true;
+class _GroupSection extends StatelessWidget {
+  final BudgetGroup group;
+  final bool open;
+  final VoidCallback onToggle;
+  final ValueChanged<BudgetCategory>? onEdit;
+
+  const _GroupSection({required this.group, required this.open, required this.onToggle, this.onEdit});
 
   @override
   Widget build(BuildContext context) {
-    final group = widget.group;
     final colors = context.colors;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
-          onTap: () => setState(() => _open = !_open),
+          onTap: onToggle,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(Space.gutter, Space.md, Space.gutter, Space.sm),
+            padding: const EdgeInsets.fromLTRB(Space.gutter, Space.md, Space.gutter, Space.xs),
             child: Row(
               children: [
                 AnimatedRotation(
-                  turns: _open ? 0 : -0.25,
-                  duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 160),
+                  turns: open ? 0 : -0.25,
+                  duration: Motion.of(context, Motion.small),
+                  curve: Motion.easeOut,
                   child: Icon(Icons.expand_more_rounded, size: 20, color: colors.onSurfaceVariant),
                 ),
                 const SizedBox(width: Space.xs),
                 Expanded(child: Text(group.name, style: context.text.titleSmall)),
                 Text(
-                  formatCents(group.balanceCents),
-                  style: figures(context.text.bodyMedium).copyWith(
-                    color: group.balanceCents < 0 ? colors.error : colors.onSurfaceVariant,
-                  ),
+                  formatBalance(group.balanceCents),
+                  style: figures(context.text.bodyMedium)
+                      .copyWith(color: group.balanceCents < 0 ? colors.error : colors.onSurfaceVariant),
                 ),
               ],
             ),
@@ -312,23 +387,56 @@ class _GroupSectionState extends State<_GroupSection> {
         ),
         AnimatedSize(
           duration: reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
+          curve: Motion.easeOut,
           alignment: Alignment.topCenter,
-          child: _open
+          child: open
               ? Column(
                   children: [
                     for (final c in group.categories)
-                      _CategoryRow(category: c, onTap: widget.onEdit == null ? null : () => widget.onEdit!(c)),
+                      _CategoryRow(category: c, onTap: onEdit == null ? null : () => onEdit!(c)),
                   ],
                 )
-              : const SizedBox(width: double.infinity),
+              // Folded: one bar for the whole group, so it still reads.
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.xs, Space.gutter, Space.sm),
+                  child: _Bar(
+                    value: _usedOf(group.spentCents, group.balanceCents),
+                    over: group.balanceCents < 0,
+                    height: 3,
+                  ),
+                ),
         ),
-        const SizedBox(height: Space.sm),
+        const SizedBox(height: Space.xs),
       ],
     );
   }
 }
 
+class _Bar extends StatelessWidget {
+  final double value;
+  final bool over;
+  final double height;
+
+  const _Bar({required this.value, required this.over, this.height = 4});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(height / 2),
+      child: LinearProgressIndicator(
+        value: value,
+        minHeight: height,
+        color: over ? colors.error : (value > 0.9 ? colors.tertiary : colors.primary),
+        backgroundColor: colors.surfaceContainerHighest,
+      ),
+    );
+  }
+}
+
+/// A category: what's left is what you came for, so it leads. Under the bar,
+/// spent and budgeted in small figures; a sentence only when overspent. On
+/// the phone's own budget the budgeted amount is a chip: the row sets it.
 class _CategoryRow extends StatelessWidget {
   final BudgetCategory category;
 
@@ -341,56 +449,136 @@ class _CategoryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final over = category.overspent;
-    final barColor = over ? colors.error : (category.usedFraction > 0.9 ? colors.tertiary : colors.primary);
+    final spent = formatBalance(-category.spentCents);
+    if (category.budgetedCents == 0 && category.spentCents == 0 && category.balanceCents == 0) {
+      return _UnusedCategoryRow(name: category.name, onTap: onTap);
+    }
+    final note = context.text.bodySmall?.copyWith(color: over ? colors.error : colors.onSurfaceVariant);
     return Semantics(
-      label: '${category.name}: ${formatCents(category.balanceCents)} left'
-          '${over ? ', overspent' : ''}',
+      label:
+          '${category.name}: ${formatBalance(category.balanceCents)} left'
+          '${over ? ', overspent' : ''}, spent $spent of ${formatBalance(category.budgetedCents)}',
       button: onTap != null,
       excludeSemantics: true,
-      child: InkWell(
+      child: Pressable(
         onTap: onTap,
         child: Padding(
-        padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(category.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.text.bodyLarge),
-                ),
-                const SizedBox(width: Space.md),
-                Text(
-                  formatCents(category.balanceCents),
-                  style: figures(context.text.bodyLarge).copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: over ? colors.error : null,
+          padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      category.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.text.bodyLarge,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: Space.xs + 2),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: category.usedFraction,
-                minHeight: 4,
-                color: barColor,
-                backgroundColor: colors.surfaceContainerHighest,
+                  const SizedBox(width: Space.md),
+                  Text(
+                    formatBalance(category.balanceCents),
+                    style: figures(context.text.bodyLarge)
+                        .copyWith(fontWeight: FontWeight.w500, color: over ? colors.error : null),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: Space.xs),
-            Text(
-              over
-                  ? 'Overspent: spent ${formatCents(category.spentCents)} of ${formatCents(category.budgetedCents)}'
-                  : 'Spent ${formatCents(category.spentCents)} of ${formatCents(category.budgetedCents)}'
-                      '${category.carryover ? ' · rolls over' : ''}',
-              style: context.text.bodySmall?.copyWith(color: over ? colors.error : colors.onSurfaceVariant),
-            ),
-          ],
+              const SizedBox(height: Space.xs + 2),
+              _Bar(value: category.usedFraction, over: over),
+              const SizedBox(height: Space.xs + 2),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        style: note,
+                        children: [
+                          TextSpan(text: over ? 'Overspent by ' : 'Spent '),
+                          TextSpan(text: over ? formatBalance(-category.balanceCents) : spent, style: figures(note)),
+                          if (!over && category.carryover) const TextSpan(text: ' · rolls over'),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: Space.sm),
+                  _Budgeted(cents: category.budgetedCents, editable: onTap != null),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// A category with nothing budgeted or spent this month: one quiet line, so
+/// the rows in use stand out.
+class _UnusedCategoryRow extends StatelessWidget {
+  final String name;
+  final VoidCallback? onTap;
+
+  const _UnusedCategoryRow({required this.name, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = context.colors.onSurfaceVariant;
+    return Semantics(
+      label: '$name: nothing budgeted',
+      button: onTap != null,
+      excludeSemantics: true,
+      child: Pressable(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.bodyMedium?.copyWith(color: muted),
+                ),
+              ),
+              const SizedBox(width: Space.md),
+              if (onTap != null)
+                const _Budgeted(cents: 0, editable: true)
+              else
+                Text(formatBalance(0), style: figures(context.text.bodySmall).copyWith(color: muted)),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _Budgeted extends StatelessWidget {
+  final int cents;
+  final bool editable;
+
+  const _Budgeted({required this.cents, required this.editable});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final small = figures(context.text.bodySmall);
+    if (!editable) return Text('of ${formatBalance(cents)}', style: small.copyWith(color: colors.onSurfaceVariant));
+    // Plain words when unset: there can be twenty of these on a screen, and
+    // the accent stays rare.
+    if (cents == 0) return Text('Set budget', style: context.text.bodySmall?.copyWith(color: colors.primary));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Text(formatBalance(cents), style: small.copyWith(color: colors.onSurface)),
     );
   }
 }

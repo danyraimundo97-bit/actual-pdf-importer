@@ -12,6 +12,13 @@ String formatCents(int cents) {
   return cents < 0 ? '−$formatted' : '+$formatted';
 }
 
+/// Formats a level, not a movement: a balance or what's left in a category.
+/// Only a minus shows; a plus on "what you have" reads as a gain.
+String formatBalance(int cents) {
+  final formatted = _formatter.format(cents.abs() / 100);
+  return cents < 0 ? '−$formatted' : formatted;
+}
+
 /// "4,50", "4.50", "1.234,56", "1,234.56", "12" → cents; null if it isn't
 /// a positive amount. The sign comes from the expense/income toggle, so a
 /// typed minus is ignored.

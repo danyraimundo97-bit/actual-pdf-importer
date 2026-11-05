@@ -425,6 +425,24 @@ Tests: backend route tests against the fake `ActualAdapter`, and on the phone, s
 covering push order, a run that stops partway and continues, pending rows surviving a pull, and the
 first-connection move.
 
+### Home and Budget redesign (2026-11-05, between 5a and 5b)
+
+A redesign that keeps the app's tokens, fonts, routes and data.
+
+- **Home:** the order now follows the questions: net worth and the sync line, this month (in, out, net,
+  share of the budget), accounts in a vertical list grouped On budget / Off budget, the latest 5
+  transactions under day headers, where the money went as ranked bars (not a donut), six months of
+  in and out with past months dimmed, then top payees.
+- **Budget:** the month switcher stays fixed; a new month slides in 180 ms from the side you moved
+  toward, and the old month stays on screen while the next is read, so the skeleton doesn't flash.
+  Used categories show what's left, a bar, spent, and the budgeted amount (a chip on the phone's own
+  budget). Unused ones are one quiet line. Folded groups stay folded across months and show one bar.
+- **Motion:** the 900 ms count-up on opening is gone: figures appear at once and only ease (180 ms)
+  when they change on screen. Rows answer a press (`Pressable`, scale 0.98).
+- `formatBalance` (no plus) is for levels such as balances and what's left; `formatCents` stays for
+  movements.
+- Checked by rendering both screens in light and dark with synthetic data. Not yet seen on a phone.
+
 ### Phase 5 in three parts
 
 Phase 5 is built and committed in three parts:

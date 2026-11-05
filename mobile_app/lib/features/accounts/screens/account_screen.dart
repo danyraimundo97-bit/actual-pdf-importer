@@ -202,12 +202,7 @@ class _DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final today = DateUtils.dateOnly(DateTime.now());
-    final label = DateUtils.isSameDay(date, today)
-        ? 'Today'
-        : DateUtils.isSameDay(date, today.subtract(const Duration(days: 1)))
-            ? 'Yesterday'
-            : formatDisplayDate(date);
+    final label = dayLabel(date);
     return Padding(
       padding: const EdgeInsets.fromLTRB(Space.gutter, Space.lg, Space.gutter, Space.xs),
       child: Text(

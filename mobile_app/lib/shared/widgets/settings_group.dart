@@ -81,6 +81,9 @@ class SettingsRow extends StatefulWidget {
   final String? value;
   final bool valueFigures;
 
+  /// The value's color, when muted isn't right (a balance on Home).
+  final Color? valueColor;
+
   /// Replaces the default chevron (shown when [onTap] is set).
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -98,6 +101,7 @@ class SettingsRow extends StatefulWidget {
     this.subtitle,
     this.value,
     this.valueFigures = false,
+    this.valueColor,
     this.trailing,
     this.onTap,
     this.destructive = false,
@@ -123,7 +127,7 @@ class _SettingsRowState extends State<SettingsRow> {
     final trailing =
         widget.trailing ??
         (enabled && !widget.destructive ? Icon(Icons.chevron_right_rounded, size: 20, color: colors.outline) : null);
-    final valueStyle = context.text.bodyMedium?.copyWith(color: muted);
+    final valueStyle = context.text.bodyMedium?.copyWith(color: widget.valueColor ?? muted);
 
     final content = Row(
       children: [

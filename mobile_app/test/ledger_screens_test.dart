@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mobile_app/core/format/dates.dart';
 import 'package:mobile_app/core/format/money.dart';
 import 'package:mobile_app/core/theme/app_theme.dart';
 import 'package:mobile_app/data/local/db/app_database.dart';
@@ -76,6 +77,7 @@ void main() {
       await pump(tester, const DashboardScreen());
 
       expect(find.text('Kept on this phone'), findsOneWidget);
+      expect(find.text(formatBalance(95750)), findsWidgets); // net worth, without a plus
       expect(find.text('Checking'), findsWidgets);
       expect(find.text('Bakery'), findsWidgets); // latest transactions and top payees
       expect(find.text(formatCents(-4250)), findsWidgets);
@@ -101,8 +103,60 @@ void main() {
       await settle(tester);
 
       expect(await run(tester, () => store.budgets(phoneScope, month)), {'preset:food.groceries': 25000});
-      expect(find.text(formatCents(21000)), findsWidgets);
+      expect(find.text(formatBalance(21000)), findsWidgets);
       await finish(tester);
+    });
+  });
+
+  group('Budget rows', () {
+    testWidgets('an unused category is one quiet line; a used one shows spent and the chip', (tester) async {
+      await run(tester, () async {
+        final id = await store.createAccount(phoneScope, name: 'Checking');
+        await store.addTransactions(id, [
+          LedgerDraft(date: now, amountCents: -4000, categoryId: 'preset:food.groceries'),
+        ]);
+        await store.setBudget(phoneScope, 'preset:food.groceries', month, 3000);
+      });
+      await pump(tester, const BudgetScreen());
+      expect(find.textContaining('Overspent by'), findsOneWidget);
+      expect(find.text(formatBalance(3000)), findsNWidgets(2)); // the summary and the chip
+      expect(find.text('Utilities'), findsOneWidget);
+      expect(find.text('Set budget'), findsWidgets);
+      await finish(tester);
+    });
+
+    testWidgets('a folded group stays folded on another month, and the skeleton never flashes', (tester) async {
+      await run(tester, () => store.setBudget(phoneScope, 'preset:food.groceries', month, 3000));
+      await pump(tester, const BudgetScreen());
+      expect(find.text('Groceries'), findsOneWidget);
+
+      await tester.tap(find.text('Food'));
+      await settle(tester);
+      expect(find.text('Groceries'), findsNothing);
+
+      await tester.tap(find.byTooltip('Next month'));
+      await tester.pump();
+      expect(find.bySemanticsLabel('Loading budget'), findsNothing);
+      await settle(tester);
+      expect(find.text(monthLabel(shiftMonth(month, 1))), findsOneWidget);
+      expect(find.text('Food'), findsOneWidget);
+      expect(find.text('Groceries'), findsNothing);
+      await finish(tester);
+    });
+  });
+
+  group('labels', () {
+    test('a balance shows no plus; a movement does', () {
+      expect(formatBalance(1250).startsWith('+'), isFalse);
+      expect(formatBalance(-1250).startsWith('−'), isTrue);
+      expect(formatCents(1250).startsWith('+'), isTrue);
+    });
+
+    test('days read as words when they can', () {
+      final today = DateTime(2026, 3, 1);
+      expect(dayLabel(today, now: today), 'Today');
+      expect(dayLabel(DateTime(2026, 2, 28), now: today), 'Yesterday');
+      expect(dayLabel(DateTime(2026, 2, 27), now: today), '27/02/2026');
     });
   });
 
