@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local/ledger_builders.dart';
+import '../../budget/screens/budget_style_screen.dart';
+import '../../budget/widgets/budget_style_cards.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../widgets/actual_step.dart';
@@ -15,7 +18,7 @@ class SetupScreen extends ConsumerStatefulWidget {
   /// Step to open on (0-[lastStep]). The dev page uses it to jump straight in.
   final int initialStep;
 
-  static const lastStep = 1;
+  static const lastStep = 2;
 
   const SetupScreen({super.key, this.initialStep = 0});
 
@@ -25,7 +28,7 @@ class SetupScreen extends ConsumerStatefulWidget {
 
 class _SetupScreenState extends ConsumerState<SetupScreen> {
   static const _stepCount = SetupScreen.lastStep + 1;
-  static const _titles = ['How it works', 'Bring your budget along'];
+  static const _titles = ['How it works', 'Your budget', 'Bring your budget along'];
 
   late final PageController _pages = PageController(initialPage: widget.initialStep);
   late int _step = widget.initialStep;
@@ -124,6 +127,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   _HowItWorksStep(onNext: () => _goTo(1)),
+                  _BudgetStep(onNext: () => _goTo(2)),
                   ActualStep(
                     urlController: _urlController,
                     tokenController: _tokenController,
@@ -199,6 +203,38 @@ class _StepLayout extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The budget's two styles, and the choice. Saved as it's tapped; Settings has
+/// it for later, and nothing depends on it yet.
+class _BudgetStep extends ConsumerWidget {
+  final VoidCallback onNext;
+
+  const _BudgetStep({required this.onNext});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _StepLayout(
+      action: BusyButton(label: 'Continue', onPressed: onNext),
+      children: [
+        const BudgetStyleExample(),
+        const SizedBox(height: Space.lg),
+        BudgetStyleChooser(
+          selected: _phoneStyle(ref),
+          onChanged: (style) => setPhoneBudgetStyle(ref, style),
+        ),
+        const SizedBox(height: Space.md),
+        Text(
+          "You can change this later in Settings. With Actual connected, the app follows that budget's own style.",
+          style: context.text.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+  /// Before a budget is connected the style on screen is the phone's. Running
+  /// setup again with one connected still sets the phone's own.
+  BudgetStyle? _phoneStyle(WidgetRef ref) => ref.watch(phoneBudgetStyleProvider).valueOrNull;
 }
 
 class _HowItWorksStep extends StatelessWidget {

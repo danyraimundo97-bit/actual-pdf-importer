@@ -120,6 +120,11 @@ void main() {
 
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
+    expect(find.text('Your budget'), findsOneWidget);
+    expect(find.text('Envelopes'), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
     expect(find.text('Bring your budget along'), findsOneWidget);
     expect(find.text('With Actual'), findsOneWidget);
 

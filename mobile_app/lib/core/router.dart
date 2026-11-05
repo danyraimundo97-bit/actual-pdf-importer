@@ -10,6 +10,7 @@ import '../features/accounts/screens/account_screen.dart';
 import '../features/accounts/screens/move_accounts_screen.dart';
 import '../features/backups/screens/backups_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
+import '../features/budget/screens/budget_style_screen.dart';
 import '../features/categories/screens/categories_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
 import '../features/categories/screens/match_categories_screen.dart';
@@ -70,6 +71,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/match-categories',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const MatchCategoriesScreen(),
+      ),
+      GoRoute(
+        path: '/settings/budget-style',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const BudgetStyleScreen(),
+      ),
+      GoRoute(
+        path: '/settings/budget-guide',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const BudgetGuideScreen(),
       ),
       GoRoute(
         path: '/move-accounts',

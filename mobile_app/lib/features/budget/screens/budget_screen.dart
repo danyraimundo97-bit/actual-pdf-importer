@@ -306,23 +306,33 @@ class _Summary extends StatelessWidget {
             color: toBudget < 0 ? colors.errorContainer : colors.primary.withValues(alpha: 0.08),
             borderRadius: Radii.controlAll,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  toBudget < 0 ? 'Overbudgeted' : 'To budget',
-                  style: context.text.titleSmall?.copyWith(
-                    color: toBudget < 0 ? colors.onErrorContainer : colors.primary,
-                  ),
+          // With large text the amount alone can fill the width, which left
+          // the label no room at all: one above the other then.
+          child: Builder(
+            builder: (context) {
+              final label = Text(
+                toBudget < 0 ? 'Overbudgeted' : 'To budget',
+                style: context.text.titleSmall?.copyWith(
+                  color: toBudget < 0 ? colors.onErrorContainer : colors.primary,
                 ),
-              ),
-              Text(
+              );
+              final amount = Text(
                 formatBalance(toBudget),
                 style: figures(
                   context.text.titleMedium,
                 ).copyWith(fontWeight: FontWeight.w600, color: toBudget < 0 ? colors.onErrorContainer : colors.primary),
-              ),
-            ],
+              );
+              if (MediaQuery.textScalerOf(context).scale(1) > 1.4) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    label,
+                    FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: amount),
+                  ],
+                );
+              }
+              return Row(children: [Expanded(child: label), amount]);
+            },
           ),
         ),
         const SizedBox(height: Space.lg),

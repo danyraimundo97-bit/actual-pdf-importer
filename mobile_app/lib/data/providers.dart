@@ -13,6 +13,7 @@ import 'local/db/local_category_store.dart';
 import 'local/db/open_connection.dart';
 import 'local/import_history_store.dart';
 import 'local/ledger_reports.dart';
+import 'local/ledger_builders.dart';
 import 'local/ledger_store.dart';
 import 'ledger_sync_controller.dart';
 import 'local/secret_store.dart';
@@ -297,6 +298,19 @@ final uncategorizedProvider = FutureProvider.autoDispose<List<UncategorizedTrans
   if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
   ref.watch(ledgerChangesProvider);
   return ref.watch(ledgerReportsProvider).uncategorized(scope);
+});
+
+/// The style of the budget on screen: the phone's own choice, or what the last
+/// pull said about Actual's.
+final budgetStyleProvider = FutureProvider.autoDispose<BudgetStyle>((ref) async {
+  ref.watch(ledgerSyncProvider.select((s) => s.lastPulledAt));
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  return BudgetStyle.parse(await ref.read(ledgerStoreProvider).budgetMode(scope));
+});
+
+/// The phone's own budget's style, whatever is on screen.
+final phoneBudgetStyleProvider = FutureProvider.autoDispose<BudgetStyle>((ref) async {
+  return BudgetStyle.parse(await ref.read(ledgerStoreProvider).budgetMode(phoneScope));
 });
 
 /// Budget for one month (`null` = the current one), from the ledger.

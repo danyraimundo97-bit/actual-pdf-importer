@@ -612,6 +612,19 @@ Built with 5b (see "Phase 5b as built").
 - Widget tests for both styles on the Budget tab at 320 dp with 2× text, in light and dark (as the
   Settings tests do).
 
+### Phase 7 as built (2026-11-05)
+
+- **Settings › Budget style** (`/settings/budget-style`): the phone's own budget chooses between Simple
+  monthly limits (the default) and Envelopes, stored as `budgetMode` on scope `''`. With Actual it shows the
+  budget's mode and says it's set in Actual.
+- **The guide:** setup has a new step, "Your budget", with the Groceries example and the choice, and Settings
+  › Help has "How budgeting works" with the same example plus overspending and To budget. The wording follows
+  `buildLedgerBudgetMonth`: overspending in Envelopes comes out of next month's To budget.
+- The cards (`features/budget/widgets/budget_style_cards.dart`) are one widget in all three places.
+- **Found by the 320 dp test:** at 2x text the To budget amount filled the row and left its label no width.
+  They stack at large text now.
+- Not yet seen on a phone.
+
 ## Phase 8: Backups include the ledger
 
 - App-data file `schemaVersion` 2 adds the phone's own-scope ledger (accounts, transactions, budget

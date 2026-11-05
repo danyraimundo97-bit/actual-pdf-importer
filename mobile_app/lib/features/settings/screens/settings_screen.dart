@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/providers.dart';
+import '../../budget/widgets/budget_style_cards.dart';
 import '../../../shared/widgets/settings_group.dart';
 import '../../categories/screens/match_categories_screen.dart';
 import '../connection_controller.dart';
@@ -139,6 +140,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ],
           const SizedBox(height: Space.xl),
           SettingsGroup(
+            children: [
+              SettingsRow(
+                icon: Icons.savings_outlined,
+                title: 'Budget style',
+                subtitle: switch (ref.watch(budgetStyleProvider).valueOrNull) {
+                  final style? => Text(budgetStyleName(style)),
+                  null => null,
+                },
+                onTap: () => context.push('/settings/budget-style'),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.xl),
+          SettingsGroup(
             label: 'Categories',
             children: [
               SettingsRow(
@@ -198,6 +213,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           SettingsGroup(
             label: 'Help',
             children: [
+              SettingsRow(
+                icon: Icons.menu_book_outlined,
+                title: 'How budgeting works',
+                onTap: () => context.push('/settings/budget-guide'),
+              ),
               SettingsRow(
                 icon: Icons.receipt_long_outlined,
                 title: 'Logs and diagnostics',
