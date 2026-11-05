@@ -43,6 +43,16 @@ class QuickAddOptions {
     );
   }
 
+  /// The category's emoji, or null if it has none or isn't visible.
+  String? categoryEmoji(String? id) {
+    for (final group in categoryGroups) {
+      for (final c in group.categories) {
+        if (c.id == id) return c.emoji;
+      }
+    }
+    return null;
+  }
+
   /// The category's name, or null if it's not (or no longer) visible.
   String? categoryName(String? id) {
     if (id == null) return null;

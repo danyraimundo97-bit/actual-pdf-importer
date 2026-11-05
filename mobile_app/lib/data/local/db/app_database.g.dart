@@ -603,6 +603,15 @@ class $CategoriesTable extends Categories
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _emojiMeta = const VerificationMeta('emoji');
+  @override
+  late final GeneratedColumn<String> emoji = GeneratedColumn<String>(
+    'emoji',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -613,6 +622,7 @@ class $CategoriesTable extends Categories
     presetKey,
     hidden,
     updatedAt,
+    emoji,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -683,6 +693,12 @@ class $CategoriesTable extends Categories
     } else if (isInserting) {
       context.missing(_updatedAtMeta);
     }
+    if (data.containsKey('emoji')) {
+      context.handle(
+        _emojiMeta,
+        emoji.isAcceptableOrUnknown(data['emoji']!, _emojiMeta),
+      );
+    }
     return context;
   }
 
@@ -724,6 +740,10 @@ class $CategoriesTable extends Categories
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
       )!,
+      emoji: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}emoji'],
+      ),
     );
   }
 
@@ -742,6 +762,9 @@ class Category extends DataClass implements Insertable<Category> {
   final String? presetKey;
   final bool hidden;
   final int updatedAt;
+
+  /// Schema 6. Null = not chosen (a preset then shows its own), '' = none.
+  final String? emoji;
   const Category({
     required this.id,
     required this.groupId,
@@ -751,6 +774,7 @@ class Category extends DataClass implements Insertable<Category> {
     this.presetKey,
     required this.hidden,
     required this.updatedAt,
+    this.emoji,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -765,6 +789,9 @@ class Category extends DataClass implements Insertable<Category> {
     }
     map['hidden'] = Variable<bool>(hidden);
     map['updated_at'] = Variable<int>(updatedAt);
+    if (!nullToAbsent || emoji != null) {
+      map['emoji'] = Variable<String>(emoji);
+    }
     return map;
   }
 
@@ -780,6 +807,9 @@ class Category extends DataClass implements Insertable<Category> {
           : Value(presetKey),
       hidden: Value(hidden),
       updatedAt: Value(updatedAt),
+      emoji: emoji == null && nullToAbsent
+          ? const Value.absent()
+          : Value(emoji),
     );
   }
 
@@ -797,6 +827,7 @@ class Category extends DataClass implements Insertable<Category> {
       presetKey: serializer.fromJson<String?>(json['presetKey']),
       hidden: serializer.fromJson<bool>(json['hidden']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
+      emoji: serializer.fromJson<String?>(json['emoji']),
     );
   }
   @override
@@ -811,6 +842,7 @@ class Category extends DataClass implements Insertable<Category> {
       'presetKey': serializer.toJson<String?>(presetKey),
       'hidden': serializer.toJson<bool>(hidden),
       'updatedAt': serializer.toJson<int>(updatedAt),
+      'emoji': serializer.toJson<String?>(emoji),
     };
   }
 
@@ -823,6 +855,7 @@ class Category extends DataClass implements Insertable<Category> {
     Value<String?> presetKey = const Value.absent(),
     bool? hidden,
     int? updatedAt,
+    Value<String?> emoji = const Value.absent(),
   }) => Category(
     id: id ?? this.id,
     groupId: groupId ?? this.groupId,
@@ -832,6 +865,7 @@ class Category extends DataClass implements Insertable<Category> {
     presetKey: presetKey.present ? presetKey.value : this.presetKey,
     hidden: hidden ?? this.hidden,
     updatedAt: updatedAt ?? this.updatedAt,
+    emoji: emoji.present ? emoji.value : this.emoji,
   );
   Category copyWithCompanion(CategoriesCompanion data) {
     return Category(
@@ -843,6 +877,7 @@ class Category extends DataClass implements Insertable<Category> {
       presetKey: data.presetKey.present ? data.presetKey.value : this.presetKey,
       hidden: data.hidden.present ? data.hidden.value : this.hidden,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      emoji: data.emoji.present ? data.emoji.value : this.emoji,
     );
   }
 
@@ -856,7 +891,8 @@ class Category extends DataClass implements Insertable<Category> {
           ..write('source: $source, ')
           ..write('presetKey: $presetKey, ')
           ..write('hidden: $hidden, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('emoji: $emoji')
           ..write(')'))
         .toString();
   }
@@ -871,6 +907,7 @@ class Category extends DataClass implements Insertable<Category> {
     presetKey,
     hidden,
     updatedAt,
+    emoji,
   );
   @override
   bool operator ==(Object other) =>
@@ -883,7 +920,8 @@ class Category extends DataClass implements Insertable<Category> {
           other.source == this.source &&
           other.presetKey == this.presetKey &&
           other.hidden == this.hidden &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.emoji == this.emoji);
 }
 
 class CategoriesCompanion extends UpdateCompanion<Category> {
@@ -895,6 +933,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
   final Value<String?> presetKey;
   final Value<bool> hidden;
   final Value<int> updatedAt;
+  final Value<String?> emoji;
   final Value<int> rowid;
   const CategoriesCompanion({
     this.id = const Value.absent(),
@@ -905,6 +944,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
     this.presetKey = const Value.absent(),
     this.hidden = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.emoji = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CategoriesCompanion.insert({
@@ -916,6 +956,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
     this.presetKey = const Value.absent(),
     this.hidden = const Value.absent(),
     required int updatedAt,
+    this.emoji = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        groupId = Value(groupId),
@@ -932,6 +973,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
     Expression<String>? presetKey,
     Expression<bool>? hidden,
     Expression<int>? updatedAt,
+    Expression<String>? emoji,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -943,6 +985,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
       if (presetKey != null) 'preset_key': presetKey,
       if (hidden != null) 'hidden': hidden,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (emoji != null) 'emoji': emoji,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -956,6 +999,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
     Value<String?>? presetKey,
     Value<bool>? hidden,
     Value<int>? updatedAt,
+    Value<String?>? emoji,
     Value<int>? rowid,
   }) {
     return CategoriesCompanion(
@@ -967,6 +1011,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
       presetKey: presetKey ?? this.presetKey,
       hidden: hidden ?? this.hidden,
       updatedAt: updatedAt ?? this.updatedAt,
+      emoji: emoji ?? this.emoji,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -998,6 +1043,9 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
+    if (emoji.present) {
+      map['emoji'] = Variable<String>(emoji.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1015,6 +1063,7 @@ class CategoriesCompanion extends UpdateCompanion<Category> {
           ..write('presetKey: $presetKey, ')
           ..write('hidden: $hidden, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('emoji: $emoji, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -6385,6 +6434,7 @@ typedef $$CategoriesTableCreateCompanionBuilder = CategoriesCompanion Function({
   Value<String?> presetKey,
   Value<bool> hidden,
   required int updatedAt,
+  Value<String?> emoji,
   Value<int> rowid,
 });
 typedef $$CategoriesTableUpdateCompanionBuilder = CategoriesCompanion Function({
@@ -6396,6 +6446,7 @@ typedef $$CategoriesTableUpdateCompanionBuilder = CategoriesCompanion Function({
   Value<String?> presetKey,
   Value<bool> hidden,
   Value<int> updatedAt,
+  Value<String?> emoji,
   Value<int> rowid,
 });
 
@@ -6501,6 +6552,11 @@ class $$CategoriesTableFilterComposer
 
   ColumnFilters<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get emoji => $composableBuilder(
+    column: $table.emoji,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6622,6 +6678,11 @@ class $$CategoriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get emoji => $composableBuilder(
+    column: $table.emoji,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$CategoryGroupsTableOrderingComposer get groupId {
     final $$CategoryGroupsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -6675,6 +6736,9 @@ class $$CategoriesTableAnnotationComposer
 
   GeneratedColumn<int> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get emoji =>
+      $composableBuilder(column: $table.emoji, builder: (column) => column);
 
   $$CategoryGroupsTableAnnotationComposer get groupId {
     final $$CategoryGroupsTableAnnotationComposer composer = $composerBuilder(
@@ -6790,6 +6854,7 @@ class $$CategoriesTableTableManager
                 Value<String?> presetKey = const Value.absent(),
                 Value<bool> hidden = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
+                Value<String?> emoji = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoriesCompanion(
                 id: id,
@@ -6800,6 +6865,7 @@ class $$CategoriesTableTableManager
                 presetKey: presetKey,
                 hidden: hidden,
                 updatedAt: updatedAt,
+                emoji: emoji,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6812,6 +6878,7 @@ class $$CategoriesTableTableManager
                 Value<String?> presetKey = const Value.absent(),
                 Value<bool> hidden = const Value.absent(),
                 required int updatedAt,
+                Value<String?> emoji = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoriesCompanion.insert(
                 id: id,
@@ -6822,6 +6889,7 @@ class $$CategoriesTableTableManager
                 presetKey: presetKey,
                 hidden: hidden,
                 updatedAt: updatedAt,
+                emoji: emoji,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

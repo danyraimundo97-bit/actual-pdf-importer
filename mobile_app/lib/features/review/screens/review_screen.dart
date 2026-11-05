@@ -200,6 +200,15 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
 
   /// The statement's local suggestions as their linked Actual categories,
   /// line by line (empty when there's nothing to map).
+  String? _categoryEmoji(String? id) {
+    for (final g in _categoryGroups) {
+      for (final c in g.categories) {
+        if (c.id == id) return c.emoji;
+      }
+    }
+    return null;
+  }
+
   Future<List<ParsedTransaction>> _linkedSuggestions(List<ActualCategoryGroup> groups) async {
     final parsed = widget.args.parseResult;
     final budgetSyncId = widget.args.budgetSyncId;
@@ -448,6 +457,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
               if (index == null) return _DateHeader(date: entry.date!);
               return TransactionRow(
                 transaction: _transactions[index],
+                categoryEmoji: _categoryEmoji(_transactions[index].effectiveCategoryId),
                 onTap: () => _editTransaction(index),
                 onToggleInclude: () => _toggleInclude(index),
               );

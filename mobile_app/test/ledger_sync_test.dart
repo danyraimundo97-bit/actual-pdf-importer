@@ -401,6 +401,7 @@ void main() {
     final raw = sqlite3.open(file.path);
     final ddl = raw.select("SELECT sql FROM sqlite_master WHERE name = 'ledger_transactions'").single['sql'] as String;
     raw
+      ..execute('ALTER TABLE categories DROP COLUMN emoji')
       ..execute('DROP TABLE ledger_categories')
       ..execute('DROP TABLE ledger_id_aliases')
       ..execute('ALTER TABLE ledger_outbox DROP COLUMN revision')

@@ -38,6 +38,9 @@ class Categories extends Table {
   BoolColumn get hidden => boolean().withDefault(const Constant(false))();
   IntColumn get updatedAt => integer()();
 
+  /// Schema 6. Null = not chosen (a preset then shows its own), '' = none.
+  TextColumn get emoji => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -93,7 +96,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -138,6 +141,7 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(ledgerIdAliases);
         }
       }
+      if (from < 6) await m.addColumn(categories, categories.emoji);
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

@@ -2,7 +2,10 @@ class ActualCategory {
   final String id;
   final String name;
 
-  const ActualCategory({required this.id, required this.name});
+  /// From the phone's ledger or its own categories; Actual has no such field.
+  final String? emoji;
+
+  const ActualCategory({required this.id, required this.name, this.emoji});
 
   factory ActualCategory.fromJson(Map<String, dynamic> json) {
     return ActualCategory(id: json['id'] as String, name: json['name'] as String);

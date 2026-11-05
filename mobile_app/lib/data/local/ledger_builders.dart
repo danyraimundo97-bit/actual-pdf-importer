@@ -99,6 +99,7 @@ Dashboard buildLedgerDashboard({
   required List<LedgerAccount> accounts,
   required List<LedgerTransaction> transactions,
   required Map<String, String> categoryNames,
+  Map<String, String> categoryEmojis = const {},
   required Map<String, String> payeeNames,
   required DateTime today,
   int months = 6,
@@ -157,6 +158,7 @@ Dashboard buildLedgerDashboard({
         categoryId: e.key,
         name: e.key == null ? 'Uncategorized' : (categoryNames[e.key] ?? 'Unknown category'),
         spendingCents: e.value,
+        emoji: categoryEmojis[e.key],
       ),
   ]..sort((a, b) => b.spendingCents.compareTo(a.spendingCents));
   final topCategories = ranked.take(_topCategories).toList();
@@ -205,6 +207,7 @@ Dashboard buildLedgerDashboard({
           amountCents: t.amountCents,
           payee: t.payeeId == null ? null : payeeNames[t.payeeId],
           category: t.categoryId == null ? null : categoryNames[t.categoryId],
+          categoryEmoji: categoryEmojis[t.categoryId],
           account: byId[t.accountId]!.name,
           accountId: t.accountId,
         ),
@@ -230,6 +233,7 @@ typedef LedgerBudgetGroup = ({String id, String name, bool isIncome, List<({Stri
 ///   budget = last month's To budget + this month's income − last month's
 ///   overspending − this month's budgeted.
 BudgetMonth buildLedgerBudgetMonth({
+  Map<String, String> categoryEmojis = const {},
   required String month,
   required BudgetStyle style,
   required List<LedgerBudgetGroup> groups,
@@ -328,6 +332,7 @@ BudgetMonth buildLedgerBudgetMonth({
               spentCents: spent[month]?[c.id] ?? 0,
               balanceCents: left[c.id] ?? 0,
               carryover: style == BudgetStyle.envelope && (budgeted[month]?[c.id]?.carryover ?? false),
+              emoji: categoryEmojis[c.id],
             ),
         ];
         int sum(int Function(BudgetCategory) f) => categories.fold(0, (s, c) => s + f(c));
@@ -355,7 +360,8 @@ BudgetMonth buildLedgerBudgetMonth({
     groups: budgetGroups,
     income: [
       for (final g in incomeGroups)
-        for (final c in g.categories) (id: c.id, name: c.name, receivedCents: received[month]?[c.id] ?? 0),
+        for (final c in g.categories)
+          (id: c.id, name: c.name, receivedCents: received[month]?[c.id] ?? 0, emoji: categoryEmojis[c.id]),
     ],
   );
 }

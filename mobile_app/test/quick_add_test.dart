@@ -311,7 +311,8 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('Lidl').last);
       await settle(tester);
-      expect(find.text('Groceries'), findsOneWidget);
+      // An Actual category named like one of the phone's takes its emoji.
+      expect(find.text('🛒 Groceries'), findsOneWidget);
 
       await tester.tap(find.text('Save'));
       await settle(tester);

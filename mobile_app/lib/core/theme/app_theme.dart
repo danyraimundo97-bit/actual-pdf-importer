@@ -151,7 +151,7 @@ class AppTheme {
           );
 
     final baseText = (isDark ? Typography.material2021().white : Typography.material2021().black)
-        .apply(fontFamily: 'Geist', bodyColor: scheme.onSurface, displayColor: scheme.onSurface);
+        .apply(fontFamily: 'Geist', fontFamilyFallback: const ['Noto Color Emoji', 'Apple Color Emoji'], bodyColor: scheme.onSurface, displayColor: scheme.onSurface);
     final textTheme = baseText.copyWith(
       headlineMedium: baseText.headlineMedium?.copyWith(
         fontSize: 28,

@@ -5,6 +5,7 @@ import '../../../core/log/app_log.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/local/db/local_category_store.dart';
 import '../../../data/providers.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/skeleton.dart';
 
 const _log = AppLog('categories');
@@ -57,6 +58,13 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
     if (name == null || name == category.name) return;
     await _change(() => _store.renameCategory(category.id, name));
     _log.info('Category renamed', {'category': category.id});
+  }
+
+  Future<void> _chooseEmoji(ManagedCategory category) async {
+    final emoji = await pickEmoji(context, categoryName: category.name, current: category.emoji);
+    if (emoji == null || emoji == (category.emoji ?? '')) return;
+    await _change(() => _store.setCategoryEmoji(category.id, emoji));
+    _log.info('Category emoji changed', {'category': category.id});
   }
 
   Future<void> _renameGroup(ManagedGroup group) async {
@@ -142,6 +150,7 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
                     _CategoryTile(
                       category: category,
                       onRename: () => _renameCategory(category),
+                      onChooseEmoji: () => _chooseEmoji(category),
                       onToggleHidden: () => _toggleHidden(category),
                     ),
                   if (group.categories.isEmpty)
@@ -190,15 +199,32 @@ class _GroupHeader extends StatelessWidget {
 class _CategoryTile extends StatelessWidget {
   final ManagedCategory category;
   final VoidCallback onRename;
+  final VoidCallback onChooseEmoji;
   final VoidCallback onToggleHidden;
 
-  const _CategoryTile({required this.category, required this.onRename, required this.onToggleHidden});
+  const _CategoryTile({
+    required this.category,
+    required this.onRename,
+    required this.onChooseEmoji,
+    required this.onToggleHidden,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     return ListTile(
-      contentPadding: const EdgeInsets.only(left: Space.gutter, right: Space.sm),
+      // The emoji's own touch target reaches into the gutter, so it stays in
+      // line with the group's name above while being easy to hit.
+      contentPadding: const EdgeInsets.only(left: Space.gutter - 12, right: Space.sm),
+      minLeadingWidth: 44,
+      horizontalTitleGap: Space.xs,
+      leading: IconButton(
+        tooltip: 'Choose an emoji for ${category.name}',
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+        icon: CategoryGlyph(emoji: category.emoji, name: category.name, muted: category.hidden),
+        onPressed: onChooseEmoji,
+      ),
       title: Text(category.name, style: category.hidden ? TextStyle(color: colors.onSurfaceVariant) : null),
       subtitle: category.hidden ? const Text('Hidden') : (category.isPreset ? null : const Text('Yours')),
       onTap: onRename,

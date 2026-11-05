@@ -11,6 +11,7 @@ import '../../../data/ledger_sync_controller.dart';
 import '../../../data/models/budget_month.dart';
 import '../../../data/models/dashboard.dart';
 import '../../../data/providers.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
@@ -511,7 +512,7 @@ class _RecentRow extends StatelessWidget {
                     style: context.text.bodyLarge?.copyWith(fontWeight: FontWeight.w500),
                   ),
                   Text(
-                    '${tx.category ?? 'Uncategorized'} · ${tx.account}',
+                    '${withEmoji(tx.categoryEmoji, tx.category ?? 'Uncategorized')} · ${tx.account}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.bodySmall?.copyWith(color: tx.category == null ? colors.primary : null),
@@ -555,6 +556,8 @@ class _CategoryBars extends StatelessWidget {
               children: [
                 Row(
                   children: [
+                    CategoryGlyph(emoji: c.emoji, name: c.categoryId == null ? null : c.name),
+                    const SizedBox(width: CategoryGlyph.gap),
                     Expanded(
                       child: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.text.bodyMedium),
                     ),

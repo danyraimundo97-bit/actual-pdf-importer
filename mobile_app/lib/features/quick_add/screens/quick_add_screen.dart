@@ -10,6 +10,7 @@ import '../../../data/local/ledger_store.dart';
 import '../../../data/models/quick_add.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/category_picker_sheet.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
@@ -184,7 +185,9 @@ class _QuickAddFormState extends ConsumerState<_QuickAddForm> {
                 label: 'Category',
                 child: _PickerTile(
                   icon: Icons.sell_outlined,
-                  label: state.categoryName ?? 'No category',
+                  label: state.categoryName == null
+                      ? 'No category'
+                      : withEmoji(widget.options.categoryEmoji(state.categoryId), state.categoryName!),
                   muted: state.categoryName == null,
                   onTap: () => _pickCategory(state.income),
                 ),
@@ -327,7 +330,7 @@ class _PayeeField extends StatelessWidget {
                       title: Text(p.name),
                       subtitle: options.categoryName(p.lastCategoryId) == null
                           ? null
-                          : Text(options.categoryName(p.lastCategoryId)!),
+                          : Text(withEmoji(options.categoryEmoji(p.lastCategoryId), options.categoryName(p.lastCategoryId)!)),
                       onTap: () => onSelected(p),
                     ),
                 ],

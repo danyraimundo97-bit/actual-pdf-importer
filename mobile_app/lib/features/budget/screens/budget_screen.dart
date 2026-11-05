@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/log/app_log.dart';
 import '../../../data/models/budget_month.dart';
 import '../../../data/providers.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../data/ledger_sync_controller.dart';
@@ -452,7 +453,7 @@ class _CategoryRow extends StatelessWidget {
     final over = category.overspent;
     final spent = formatBalance(-category.spentCents);
     if (category.budgetedCents == 0 && category.spentCents == 0 && category.balanceCents == 0) {
-      return _UnusedCategoryRow(name: category.name, onTap: onTap);
+      return _UnusedCategoryRow(name: category.name, emoji: category.emoji, onTap: onTap);
     }
     final note = context.text.bodySmall?.copyWith(color: over ? colors.error : colors.onSurfaceVariant);
     return Semantics(
@@ -464,50 +465,66 @@ class _CategoryRow extends StatelessWidget {
       child: Pressable(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.sm),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      category.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.text.bodyLarge,
-                    ),
-                  ),
-                  const SizedBox(width: Space.md),
-                  Text(
-                    formatBalance(category.balanceCents),
-                    style: figures(context.text.bodyLarge)
-                        .copyWith(fontWeight: FontWeight.w500, color: over ? colors.error : null),
-                  ),
-                ],
+              // On the name's line, whose text sits lower in its taller box.
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: CategoryGlyph(emoji: category.emoji, name: category.name),
               ),
-              const SizedBox(height: Space.xs + 2),
-              _Bar(value: category.usedFraction, over: over),
-              const SizedBox(height: Space.xs + 2),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text.rich(
-                      TextSpan(
-                        style: note,
-                        children: [
-                          TextSpan(text: over ? 'Overspent by ' : 'Spent '),
-                          TextSpan(text: over ? formatBalance(-category.balanceCents) : spent, style: figures(note)),
-                          if (!over && category.carryover) const TextSpan(text: ' · rolls over'),
-                        ],
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+              const SizedBox(width: CategoryGlyph.gap),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            category.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.text.bodyLarge,
+                          ),
+                        ),
+                        const SizedBox(width: Space.md),
+                        Text(
+                          formatBalance(category.balanceCents),
+                          style: figures(context.text.bodyLarge)
+                              .copyWith(fontWeight: FontWeight.w500, color: over ? colors.error : null),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: Space.sm),
-                  _Budgeted(cents: category.budgetedCents, editable: onTap != null),
-                ],
+                    const SizedBox(height: Space.xs + 2),
+                    _Bar(value: category.usedFraction, over: over),
+                    const SizedBox(height: Space.xs + 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              style: note,
+                              children: [
+                                TextSpan(text: over ? 'Overspent by ' : 'Spent '),
+                                TextSpan(
+                                  text: over ? formatBalance(-category.balanceCents) : spent,
+                                  style: figures(note),
+                                ),
+                                if (!over && category.carryover) const TextSpan(text: ' · rolls over'),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: Space.sm),
+                        _Budgeted(cents: category.budgetedCents, editable: onTap != null),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -521,9 +538,10 @@ class _CategoryRow extends StatelessWidget {
 /// the rows in use stand out.
 class _UnusedCategoryRow extends StatelessWidget {
   final String name;
+  final String? emoji;
   final VoidCallback? onTap;
 
-  const _UnusedCategoryRow({required this.name, this.onTap});
+  const _UnusedCategoryRow({required this.name, this.emoji, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -535,9 +553,11 @@ class _UnusedCategoryRow extends StatelessWidget {
       child: Pressable(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(Space.gutter + Space.xl, Space.sm, Space.gutter, Space.sm),
+          padding: const EdgeInsets.fromLTRB(Space.gutter, Space.sm, Space.gutter, Space.sm),
           child: Row(
             children: [
+              CategoryGlyph(emoji: emoji, name: name, muted: true),
+              const SizedBox(width: CategoryGlyph.gap),
               Expanded(
                 child: Text(
                   name,
@@ -585,7 +605,7 @@ class _Budgeted extends StatelessWidget {
 }
 
 class _IncomeSection extends StatelessWidget {
-  final List<({String id, String name, int receivedCents})> income;
+  final List<({String id, String name, int receivedCents, String? emoji})> income;
 
   const _IncomeSection({required this.income});
 
@@ -603,6 +623,8 @@ class _IncomeSection extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: Space.xs + 2),
               child: Row(
                 children: [
+                  CategoryGlyph(emoji: i.emoji, name: i.name),
+                  const SizedBox(width: CategoryGlyph.gap),
                   Expanded(child: Text(i.name, style: context.text.bodyLarge)),
                   Text(
                     formatCents(i.receivedCents),

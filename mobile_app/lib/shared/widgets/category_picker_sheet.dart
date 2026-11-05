@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 
+import '../../core/format/category_emoji.dart';
 import '../../data/models/actual_category.dart';
+import 'category_emoji.dart';
 
 class CategoryChoice {
   final String id;
@@ -121,12 +123,29 @@ class _GroupSection extends StatelessWidget {
           ),
         ),
         for (final category in categories)
-          ListTile(
-            visualDensity: VisualDensity.compact,
-            title: Text(category.name),
-            onTap: () => Navigator.pop(context, CategoryChoice(category.id, category.name)),
-          ),
+          _CategoryTile(category: category),
       ],
+    );
+  }
+}
+
+class _CategoryTile extends StatelessWidget {
+  final ActualCategory category;
+
+  const _CategoryTile({required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    // From the backend's list the emoji is still in the name.
+    final split = splitCategoryName(category.name);
+    return ListTile(
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: Space.gutter),
+      minLeadingWidth: CategoryGlyph.width,
+      horizontalTitleGap: Space.md,
+      leading: CategoryGlyph(emoji: category.emoji ?? split.emoji, name: split.name),
+      title: Text(split.name),
+      onTap: () => Navigator.pop(context, CategoryChoice(category.id, category.name)),
     );
   }
 }

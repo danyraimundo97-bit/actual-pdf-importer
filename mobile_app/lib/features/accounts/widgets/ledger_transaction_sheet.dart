@@ -4,6 +4,8 @@ import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/actual_category.dart';
+import '../../../core/format/category_emoji.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/category_picker_sheet.dart';
 import '../../../shared/widgets/labeled_field.dart';
 import '../../../shared/widgets/sheet_body.dart';
@@ -20,6 +22,7 @@ Future<LedgerTransactionAction?> showLedgerTransactionSheet(
   BuildContext context, {
   required LedgerTransactionEdit current,
   required String? categoryName,
+  String? categoryEmoji,
   required List<ActualCategoryGroup> categoryGroups,
 }) {
   return showModalBottomSheet<LedgerTransactionAction>(
@@ -27,16 +30,22 @@ Future<LedgerTransactionAction?> showLedgerTransactionSheet(
     isScrollControlled: true,
     useSafeArea: true,
     sheetAnimationStyle: Motion.sheet(context),
-    builder: (_) => _LedgerTransactionSheet(current: current, categoryName: categoryName, groups: categoryGroups),
+    builder: (_) => _LedgerTransactionSheet(
+      current: current,
+      categoryName: categoryName,
+      categoryEmoji: categoryEmoji,
+      groups: categoryGroups,
+    ),
   );
 }
 
 class _LedgerTransactionSheet extends StatefulWidget {
   final LedgerTransactionEdit current;
   final String? categoryName;
+  final String? categoryEmoji;
   final List<ActualCategoryGroup> groups;
 
-  const _LedgerTransactionSheet({required this.current, required this.categoryName, required this.groups});
+  const _LedgerTransactionSheet({required this.current, required this.categoryName, this.categoryEmoji, required this.groups});
 
   @override
   State<_LedgerTransactionSheet> createState() => _LedgerTransactionSheetState();
@@ -49,6 +58,7 @@ class _LedgerTransactionSheetState extends State<_LedgerTransactionSheet> {
   late DateTime _date = widget.current.date;
   late String? _categoryId = widget.current.categoryId;
   late String? _categoryName = widget.categoryName;
+  late String? _categoryEmoji = widget.categoryEmoji;
   String? _amountError;
 
   @override
@@ -69,12 +79,22 @@ class _LedgerTransactionSheetState extends State<_LedgerTransactionSheet> {
     if (picked != null) setState(() => _date = picked);
   }
 
+  String? _emojiOf(String id) {
+    for (final g in widget.groups) {
+      for (final c in g.categories) {
+        if (c.id == id) return c.emoji;
+      }
+    }
+    return null;
+  }
+
   Future<void> _pickCategory() async {
     final selected = await pickCategory(context, widget.groups);
     if (selected != null) {
       setState(() {
         _categoryId = selected.id;
-        _categoryName = selected.name;
+        _categoryName = splitCategoryName(selected.name).name;
+        _categoryEmoji = _emojiOf(selected.id) ?? splitCategoryName(selected.name).emoji;
       });
     }
   }
@@ -175,7 +195,7 @@ class _LedgerTransactionSheetState extends State<_LedgerTransactionSheet> {
           label: 'Category',
           child: PickerField(
             leadingIcon: Icons.sell_outlined,
-            value: _categoryName ?? 'Uncategorized',
+            value: _categoryName == null ? 'Uncategorized' : withEmoji(_categoryEmoji, _categoryName!),
             isPlaceholder: _categoryName == null,
             trailingIcon: Icons.chevron_right_rounded,
             onTap: _pickCategory,

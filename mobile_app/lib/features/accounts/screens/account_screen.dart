@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/models/account_page.dart';
 import '../../../data/local/ledger_store.dart';
 import '../../../data/providers.dart';
+import '../../../shared/widgets/category_emoji.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
@@ -72,6 +73,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         notes: tx.notes ?? '',
       ),
       categoryName: tx.category,
+      categoryEmoji: tx.categoryEmoji,
       categoryGroups: groups,
     );
     if (action == null) return;
@@ -233,7 +235,7 @@ class _TransactionRow extends StatelessWidget {
     } else if (tx.splits.isNotEmpty) {
       detail = 'Split: ${tx.splits.map((s) => s.category ?? 'Uncategorized').toSet().join(', ')}';
     } else {
-      detail = tx.category ?? 'Uncategorized';
+      detail = withEmoji(tx.categoryEmoji, tx.category ?? 'Uncategorized');
     }
     final uncategorized = !tx.openingBalance && !tx.transfer && tx.splits.isEmpty && tx.category == null;
     return InkWell(

@@ -1,14 +1,18 @@
 import 'package:drift/drift.dart';
 
+import '../../core/format/category_emoji.dart';
 import '../models/account_page.dart';
 import '../models/actual_account.dart';
 import '../models/actual_category.dart';
 import '../models/budget_month.dart';
 import '../models/dashboard.dart';
 import '../models/quick_add.dart';
+import '../../core/format/fold.dart';
 import 'db/app_database.dart';
 import 'ledger_builders.dart';
 import 'ledger_store.dart';
+
+typedef _CategoryLook = ({String name, String? emoji});
 
 /// Home, Budget and the account screen read from the local ledger
 /// (docs/plans/local-ledger.md, Phase 4): loads the rows, then hands them to
@@ -22,10 +26,12 @@ class LedgerReports {
   final DateTime Function() _now;
 
   Future<Dashboard> dashboard(String scope, {int months = 6}) async {
+    final looks = await _categoryLooks(scope);
     return buildLedgerDashboard(
       accounts: await _store.accounts(scope),
       transactions: await _store.allTransactions(scope),
-      categoryNames: await _categoryNames(scope),
+      categoryNames: _names(looks),
+      categoryEmojis: _emojis(looks),
       payeeNames: await _store.payeeNames(scope),
       today: _now(),
       months: months,
@@ -37,6 +43,7 @@ class LedgerReports {
     final today = _now();
     return buildLedgerBudgetMonth(
       month: month ?? ledgerMonthKeys(today, 1).single,
+      categoryEmojis: _emojis(await _categoryLooks(scope)),
       style: BudgetStyle.parse(await _store.budgetMode(scope)),
       groups: await _budgetGroups(scope),
       accounts: await _store.accounts(scope),
@@ -72,7 +79,8 @@ class LedgerReports {
             _db.ledgerTransactions,
           )..where((t) => t.parentId.isIn(parents) & t.deleted.equals(false))).get();
     final payees = await _store.payeeNames(account.scope);
-    final categories = await _categoryNames(account.scope);
+    final looks = await _categoryLooks(account.scope);
+    final categories = _names(looks);
     return AccountPage(
       accountId: account.id,
       accountName: account.name,
@@ -87,6 +95,7 @@ class LedgerReports {
             payee: r.payeeId == null ? null : payees[r.payeeId],
             openingBalance: r.startingBalance,
             category: r.categoryId == null ? null : categories[r.categoryId],
+            categoryEmoji: looks[r.categoryId]?.emoji,
             notes: r.notes,
             transfer: r.transferId != null,
             cleared: r.cleared,
@@ -122,7 +131,7 @@ class LedgerReports {
     }
     return QuickAddOptions(
       accounts: accounts,
-      categoryGroups: _pickerGroups(groups),
+      categoryGroups: _pickerGroups(groups, _emojis(await _categoryLooks(scope))),
       incomeGroupIds: {
         for (final g in groups)
           if (g.isIncome) g.id,
@@ -134,29 +143,59 @@ class LedgerReports {
   static const _recentPayees = 50;
 
   /// [scope]'s visible categories, for a category picker.
-  Future<List<ActualCategoryGroup>> categoryPicker(String scope) async => _pickerGroups(await _budgetGroups(scope));
+  Future<List<ActualCategoryGroup>> categoryPicker(String scope) async =>
+      _pickerGroups(await _budgetGroups(scope), _emojis(await _categoryLooks(scope)));
 
-  List<ActualCategoryGroup> _pickerGroups(List<LedgerBudgetGroup> groups) => [
+  List<ActualCategoryGroup> _pickerGroups(List<LedgerBudgetGroup> groups, Map<String, String> emojis) => [
     for (final g in groups)
       if (g.categories.isNotEmpty)
         ActualCategoryGroup(
           id: g.id,
           name: g.name,
-          categories: [for (final c in g.categories) ActualCategory(id: c.id, name: c.name)],
+          categories: [for (final c in g.categories) ActualCategory(id: c.id, name: c.name, emoji: emojis[c.id])],
         ),
   ];
 
-  /// Every category's name, hidden ones included (old transactions keep
-  /// theirs).
-  Future<Map<String, String>> _categoryNames(String scope) async => scope == phoneScope
-      ? _phoneCategoryNames()
-      : {
-          for (final c in await (_db.select(_db.ledgerCategories)..where((c) => c.scope.equals(scope))).get())
-            c.id: c.name,
-        };
+  /// Every category's name and emoji, hidden ones included (old transactions
+  /// keep theirs). An emoji at the start of a name comes off the name. For an
+  /// Actual category without one: the phone category linked to it, then one
+  /// with the same name.
+  Future<Map<String, _CategoryLook>> _categoryLooks(String scope) async {
+    final phone = await _db.select(_db.categories).get();
+    _CategoryLook look(String name, String? other) {
+      final split = splitCategoryName(name);
+      return (name: split.name, emoji: split.emoji ?? other);
+    }
 
-  Future<Map<String, String>> _phoneCategoryNames() async => {
-    for (final c in await _db.select(_db.categories).get()) c.id: c.name,
+    if (scope == phoneScope) {
+      return {for (final c in phone) c.id: look(c.name, phoneCategoryEmoji(c.emoji, c.presetKey))};
+    }
+    final byId = {for (final c in phone) c.id: c};
+    final byName = <String, String>{
+      for (final c in phone)
+        if (phoneCategoryEmoji(c.emoji, c.presetKey) case final emoji?)
+          _nameKey(splitCategoryName(c.name).name): emoji,
+    };
+    final links = await (_db.select(_db.categoryLinks)..where((l) => l.budgetSyncId.equals(scope))).get();
+    final linked = <String, String>{};
+    for (final l in links) {
+      final c = byId[l.categoryId];
+      final emoji = c == null ? null : phoneCategoryEmoji(c.emoji, c.presetKey);
+      if (emoji != null) linked[l.actualCategoryId] = emoji;
+    }
+    return {
+      for (final c in await (_db.select(_db.ledgerCategories)..where((c) => c.scope.equals(scope))).get())
+        c.id: look(c.name, linked[c.id] ?? byName[_nameKey(splitCategoryName(c.name).name)]),
+    };
+  }
+
+  static String _nameKey(String name) => foldAccents(name).trim().toLowerCase();
+
+  Map<String, String> _names(Map<String, _CategoryLook> looks) => {for (final e in looks.entries) e.key: e.value.name};
+
+  Map<String, String> _emojis(Map<String, _CategoryLook> looks) => {
+    for (final e in looks.entries)
+      e.key: ?e.value.emoji,
   };
 
   /// The phone's visible categories, in order, as the budget lists them.
@@ -178,7 +217,7 @@ class LedgerReports {
       if (groups.isEmpty || groups.last.id != c.groupId) {
         groups.add((id: c.groupId, name: c.groupName, isIncome: c.groupIsIncome, categories: []));
       }
-      groups.last.categories.add((id: c.id, name: c.name));
+      groups.last.categories.add((id: c.id, name: splitCategoryName(c.name).name));
     }
     return groups;
   }
@@ -202,7 +241,7 @@ class LedgerReports {
           isIncome: g.isIncome,
           categories: [
             for (final c in categories)
-              if (c.groupId == g.id) (id: c.id, name: c.name),
+              if (c.groupId == g.id) (id: c.id, name: splitCategoryName(c.name).name),
           ],
         ),
     ];

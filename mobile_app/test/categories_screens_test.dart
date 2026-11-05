@@ -78,6 +78,26 @@ void main() {
     expect(picker!.expand((g) => g.categories).map((c) => c.name), isNot(contains('Groceries')));
   });
 
+  testWidgets('categories: choosing an emoji, and choosing none', (tester) async {
+    await pump(tester, const CategoriesScreen());
+    expect(find.text('🛒'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Choose an emoji for Groceries'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('🥖'));
+    await settle(tester);
+    expect(find.text('🥖'), findsOneWidget);
+    expect(find.text('🛒'), findsNothing);
+
+    await tester.tap(find.byTooltip('Choose an emoji for Groceries'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('No emoji'));
+    await settle(tester);
+    expect(find.text('🥖'), findsNothing);
+    // Its first letter keeps the column.
+    expect(find.text('G'), findsOneWidget);
+  });
+
   testWidgets('categories: adding one to a group', (tester) async {
     await pump(tester, const CategoriesScreen());
 

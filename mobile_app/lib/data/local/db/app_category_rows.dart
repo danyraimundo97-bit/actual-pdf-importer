@@ -46,6 +46,7 @@ Future<List<Map<String, Object?>>> appCategoryRows(AppDatabase db, {int watermar
           'source': c.source,
           'presetKey': c.presetKey,
           'hidden': c.hidden,
+          'emoji': c.emoji,
         },
       },
     for (final l in links)
@@ -113,6 +114,7 @@ Future<bool> _applyAppCategory(AppDatabase db, Map<String, dynamic> row) async {
               source: data['source'] as String,
               presetKey: Value(data['presetKey'] as String?),
               hidden: Value(data['hidden'] as bool? ?? false),
+              emoji: Value(data['emoji'] as String?),
               updatedAt: updatedAt,
             ),
           );

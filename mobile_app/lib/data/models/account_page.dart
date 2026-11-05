@@ -41,6 +41,7 @@ class AccountTransaction {
   final int amountCents;
   final String? payee;
   final String? category;
+  final String? categoryEmoji;
   final String? notes;
   final bool transfer;
   final bool cleared;
@@ -56,6 +57,7 @@ class AccountTransaction {
     required this.amountCents,
     this.payee,
     this.category,
+    this.categoryEmoji,
     this.notes,
     this.transfer = false,
     this.cleared = false,

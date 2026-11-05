@@ -11,7 +11,7 @@ class BudgetMonth {
   final int totalBalanceCents;
   final int incomeCents;
   final List<BudgetGroup> groups;
-  final List<({String id, String name, int receivedCents})> income;
+  final List<({String id, String name, int receivedCents, String? emoji})> income;
 
   const BudgetMonth({
     required this.month,
@@ -38,7 +38,7 @@ class BudgetMonth {
         groups: (json['groups'] as List).cast<Map<String, dynamic>>().map(BudgetGroup.fromJson).toList(),
         income: (json['income'] as List? ?? const [])
             .cast<Map<String, dynamic>>()
-            .map((i) => (id: i['id'] as String, name: i['name'] as String, receivedCents: i['receivedCents'] as int))
+            .map((i) => (id: i['id'] as String, name: i['name'] as String, receivedCents: i['receivedCents'] as int, emoji: null))
             .toList(),
       );
 }
@@ -77,6 +77,7 @@ class BudgetCategory {
   final int spentCents;
   final int balanceCents;
   final bool carryover;
+  final String? emoji;
 
   const BudgetCategory({
     required this.id,
@@ -85,6 +86,7 @@ class BudgetCategory {
     required this.spentCents,
     required this.balanceCents,
     this.carryover = false,
+    this.emoji,
   });
 
   bool get overspent => balanceCents < 0;

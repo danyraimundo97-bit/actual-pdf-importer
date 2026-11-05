@@ -240,6 +240,7 @@ void main() {
     ]) {
       raw.execute('DROP TABLE $table');
     }
+    raw.execute('ALTER TABLE categories DROP COLUMN emoji');
     raw.execute('PRAGMA user_version = 2');
     raw.close();
 

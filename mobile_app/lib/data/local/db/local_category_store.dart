@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:drift/drift.dart';
 
+import '../../../core/format/category_emoji.dart';
 import '../../category_suggestions.dart';
 import '../../models/actual_category.dart';
 import 'app_database.dart';
@@ -13,7 +14,7 @@ enum SuggestionSource { memory, hint }
 typedef LocalSuggestion = ({String categoryId, String categoryName, SuggestionSource source});
 
 /// A category as the Categories screen shows it, hidden ones included.
-typedef ManagedCategory = ({String id, String name, bool hidden, bool isPreset});
+typedef ManagedCategory = ({String id, String name, bool hidden, bool isPreset, String? emoji});
 
 typedef ManagedGroup = ({
   String id,
@@ -60,7 +61,8 @@ class LocalCategoryStore {
             name: g.name,
             categories: [
               for (final c in categories)
-                if (c.groupId == g.id) ActualCategory(id: c.id, name: c.name),
+                if (c.groupId == g.id)
+                  ActualCategory(id: c.id, name: c.name, emoji: phoneCategoryEmoji(c.emoji, c.presetKey)),
             ],
           ),
     ];
@@ -212,7 +214,14 @@ class LocalCategoryStore {
           isPreset: g.source == 'preset',
           categories: [
             for (final c in categories)
-              if (c.groupId == g.id) (id: c.id, name: c.name, hidden: c.hidden, isPreset: c.source == 'preset'),
+              if (c.groupId == g.id)
+                (
+                  id: c.id,
+                  name: c.name,
+                  hidden: c.hidden,
+                  isPreset: c.source == 'preset',
+                  emoji: phoneCategoryEmoji(c.emoji, c.presetKey),
+                ),
           ],
         ),
     ];
@@ -224,6 +233,11 @@ class LocalCategoryStore {
 
   Future<void> renameGroup(String id, String name) => (_db.update(_db.categoryGroups)..where((g) => g.id.equals(id)))
       .write(CategoryGroupsCompanion(name: Value(_checkedName(name)), updatedAt: Value(_at)));
+
+  /// [emoji] '' means none, which stays none even for a preset.
+  Future<void> setCategoryEmoji(String id, String emoji) => (_db.update(
+    _db.categories,
+  )..where((c) => c.id.equals(id))).write(CategoriesCompanion(emoji: Value(emoji), updatedAt: Value(_at)));
 
   /// Hidden categories leave the picker and stop being suggested, but keep
   /// their mappings: nothing is deleted, so showing one again restores all.

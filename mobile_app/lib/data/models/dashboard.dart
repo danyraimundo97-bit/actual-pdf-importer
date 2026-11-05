@@ -84,8 +84,9 @@ class CategorySpend {
   final String? categoryId;
   final String name;
   final int spendingCents;
+  final String? emoji;
 
-  const CategorySpend({this.categoryId, required this.name, required this.spendingCents});
+  const CategorySpend({this.categoryId, required this.name, required this.spendingCents, this.emoji});
 
   factory CategorySpend.fromJson(Map<String, dynamic> json) => CategorySpend(
     categoryId: json['categoryId'] as String?,
@@ -114,6 +115,7 @@ class RecentTransaction {
   final int amountCents;
   final String? payee;
   final String? category;
+  final String? categoryEmoji;
   final String account;
 
   /// Null from backends older than the account screen.
@@ -125,6 +127,7 @@ class RecentTransaction {
     required this.amountCents,
     this.payee,
     this.category,
+    this.categoryEmoji,
     required this.account,
     this.accountId,
   });

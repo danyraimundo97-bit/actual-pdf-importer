@@ -8,6 +8,7 @@ import '../../../data/models/parsed_transaction.dart';
 /// ReviewScreen), so the row spends its width on payee, category and amount.
 class TransactionRow extends StatelessWidget {
   final ParsedTransaction transaction;
+  final String? categoryEmoji;
   final VoidCallback onTap;
   final VoidCallback onToggleInclude;
 
@@ -16,6 +17,7 @@ class TransactionRow extends StatelessWidget {
     required this.transaction,
     required this.onTap,
     required this.onToggleInclude,
+    this.categoryEmoji,
   });
 
   @override
@@ -62,6 +64,7 @@ class TransactionRow extends StatelessWidget {
                           const SizedBox(height: 2),
                           _CategoryLine(
                             name: categoryName,
+                            emoji: categoryEmoji,
                             edited: transaction.edited,
                             hint: transaction.showsHint,
                           ),
@@ -90,12 +93,13 @@ class TransactionRow extends StatelessWidget {
 
 class _CategoryLine extends StatelessWidget {
   final String? name;
+  final String? emoji;
   final bool edited;
 
   /// The category is a merchant hint, not the user's own memory.
   final bool hint;
 
-  const _CategoryLine({required this.name, required this.edited, this.hint = false});
+  const _CategoryLine({required this.name, this.emoji, required this.edited, this.hint = false});
 
   @override
   Widget build(BuildContext context) {
@@ -104,7 +108,10 @@ class _CategoryLine extends StatelessWidget {
     final color = uncategorized ? colors.primary : colors.onSurfaceVariant;
     return Row(
       children: [
-        Icon(uncategorized ? Icons.add_rounded : Icons.sell_outlined, size: 14, color: color),
+        if (emoji != null && !uncategorized)
+          ExcludeSemantics(child: Text(emoji!, style: const TextStyle(fontSize: 12, height: 1.2)))
+        else
+          Icon(uncategorized ? Icons.add_rounded : Icons.sell_outlined, size: 14, color: color),
         const SizedBox(width: Space.xs),
         Flexible(
           child: Text(
