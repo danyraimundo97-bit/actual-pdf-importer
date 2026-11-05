@@ -109,6 +109,27 @@ class PayeeSpend {
   );
 }
 
+/// A transaction Home counts as without a category.
+class UncategorizedTransaction {
+  final String id;
+  final DateTime date;
+  final int amountCents;
+  final String? payee;
+  final String account;
+
+  /// A part of a split: those are changed in Actual, not on the phone.
+  final bool inSplit;
+
+  const UncategorizedTransaction({
+    required this.id,
+    required this.date,
+    required this.amountCents,
+    this.payee,
+    required this.account,
+    this.inSplit = false,
+  });
+}
+
 class RecentTransaction {
   final String id;
   final DateTime date;

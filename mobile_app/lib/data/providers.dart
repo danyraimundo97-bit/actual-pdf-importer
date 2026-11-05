@@ -291,6 +291,14 @@ final dashboardProvider = FutureProvider.autoDispose<Dashboard>((ref) async {
   return ref.watch(ledgerReportsProvider).dashboard(scope);
 });
 
+/// What Home's "without a category" line counts.
+final uncategorizedProvider = FutureProvider.autoDispose<List<UncategorizedTransaction>>((ref) async {
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
+  ref.watch(ledgerChangesProvider);
+  return ref.watch(ledgerReportsProvider).uncategorized(scope);
+});
+
 /// Budget for one month (`null` = the current one), from the ledger.
 final budgetMonthProvider = FutureProvider.autoDispose.family<BudgetMonth, String?>((ref, month) async {
   final scope = await ref.watch(ledgerScopeProvider.future);

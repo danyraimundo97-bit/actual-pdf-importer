@@ -453,14 +453,19 @@ class _UncategorizedRow extends StatelessWidget {
       borderRadius: Radii.controlAll,
       clipBehavior: Clip.antiAlias,
       child: Pressable(
-        onTap: () => context.push('/settings/categories'),
+        onTap: () => context.push('/dashboard/uncategorized'),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.md, Space.md),
           child: Row(
             children: [
               Icon(Icons.sell_outlined, color: colors.primary, size: 18),
               const SizedBox(width: Space.md),
-              Expanded(child: Text('$count in the last 30 days without a category', style: context.text.bodyMedium)),
+              Expanded(child: Text(
+                  count == 1
+                      ? '1 transaction in the last 30 days without a category'
+                      : '$count transactions in the last 30 days without a category',
+                  style: context.text.bodyMedium,
+                )),
               Icon(Icons.chevron_right_rounded, size: 20, color: colors.onSurfaceVariant),
             ],
           ),

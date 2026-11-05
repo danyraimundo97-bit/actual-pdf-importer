@@ -45,7 +45,7 @@ List<String> ledgerMonthKeys(DateTime today, int count) => [
 
 /// One amount as the budget and the flows read it: a top-level transaction,
 /// or a split's child in place of its parent.
-typedef _Leaf = ({String date, int amountCents, String? categoryId, String? payeeId});
+typedef _Leaf = ({String id, String accountId, bool inSplit, String date, int amountCents, String? categoryId, String? payeeId});
 
 /// The top-level rows and, separately, the leaves. A split's parent carries
 /// the total but no category, its children the categories: balances read
@@ -70,11 +70,29 @@ typedef _Leaf = ({String date, int amountCents, String? categoryId, String? paye
 List<_Leaf> _leaves(LedgerTransaction t, Map<String, List<LedgerTransaction>> children) {
   final kids = children[t.id];
   if (kids == null || kids.isEmpty) {
-    return [(date: t.date, amountCents: t.amountCents, categoryId: t.categoryId, payeeId: t.payeeId)];
+    return [
+      (
+        id: t.id,
+        accountId: t.accountId,
+        inSplit: false,
+        date: t.date,
+        amountCents: t.amountCents,
+        categoryId: t.categoryId,
+        payeeId: t.payeeId,
+      ),
+    ];
   }
   return [
     for (final k in kids)
-      (date: t.date, amountCents: k.amountCents, categoryId: k.categoryId, payeeId: k.payeeId ?? t.payeeId),
+      (
+        id: k.id,
+        accountId: t.accountId,
+        inSplit: true,
+        date: t.date,
+        amountCents: k.amountCents,
+        categoryId: k.categoryId,
+        payeeId: k.payeeId ?? t.payeeId,
+      ),
   ];
 }
 
@@ -93,6 +111,41 @@ List<_Leaf> _flows(List<LedgerAccount> accounts, List<LedgerTransaction> transac
     for (final t in shaped.top)
       if (onBudget.contains(t.accountId) && _isFlow(t)) ..._leaves(t, shaped.children),
   ];
+}
+
+/// Home's "without a category": one rule for the count and for the list that
+/// shows them, so the two always agree.
+List<_Leaf> _uncategorizedFlows(List<_Leaf> flows, DateTime today) {
+  final cutoff = _isoDate(DateTime(today.year, today.month, today.day - _uncategorizedWindowDays));
+  return [
+    for (final f in flows)
+      if (f.categoryId == null && f.date.compareTo(cutoff) >= 0) f,
+  ];
+}
+
+/// What Home counts as without a category, newest first.
+List<UncategorizedTransaction> buildUncategorized({
+  required List<LedgerAccount> accounts,
+  required List<LedgerTransaction> transactions,
+  required Map<String, String> payeeNames,
+  required DateTime today,
+}) {
+  final open = [
+    for (final a in accounts)
+      if (!a.deleted && !a.closed) a,
+  ];
+  final names = {for (final a in open) a.id: a.name};
+  return [
+    for (final f in _uncategorizedFlows(_flows(open, transactions), today))
+      UncategorizedTransaction(
+        id: f.id,
+        date: DateTime.parse(f.date),
+        amountCents: f.amountCents,
+        payee: f.payeeId == null ? null : payeeNames[f.payeeId],
+        account: names[f.accountId]!,
+        inSplit: f.inSplit,
+      ),
+  ]..sort((a, b) => b.date.compareTo(a.date));
 }
 
 Dashboard buildLedgerDashboard({
@@ -183,8 +236,7 @@ Dashboard buildLedgerDashboard({
       PayeeSpend(name: e.key, spendingCents: e.value.spendingCents, count: e.value.count),
   ]..sort((a, b) => b.spendingCents.compareTo(a.spendingCents));
 
-  final cutoff = _isoDate(DateTime(today.year, today.month, today.day - _uncategorizedWindowDays));
-  final uncategorized = flows.where((f) => f.categoryId == null && f.date.compareTo(cutoff) >= 0).length;
+  final uncategorized = _uncategorizedFlows(flows, today).length;
 
   final recent = [...top]
     ..sort((a, b) {

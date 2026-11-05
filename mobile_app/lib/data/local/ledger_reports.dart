@@ -38,6 +38,14 @@ class LedgerReports {
     );
   }
 
+  /// What Home counts as without a category.
+  Future<List<UncategorizedTransaction>> uncategorized(String scope) async => buildUncategorized(
+    accounts: await _store.accounts(scope),
+    transactions: await _store.allTransactions(scope),
+    payeeNames: await _store.payeeNames(scope),
+    today: _now(),
+  );
+
   /// [month] null = the current month.
   Future<BudgetMonth> budgetMonth(String scope, String? month) async {
     final today = _now();

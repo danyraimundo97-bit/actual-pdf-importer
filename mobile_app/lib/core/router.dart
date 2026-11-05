@@ -14,6 +14,7 @@ import '../features/categories/screens/categories_screen.dart';
 import '../features/categories/screens/category_memory_screen.dart';
 import '../features/categories/screens/match_categories_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
+import '../features/dashboard/screens/uncategorized_screen.dart';
 import '../features/dev/dev_screen.dart';
 import '../features/diagnostics/diagnostics_screen.dart';
 import '../features/import/screens/import_screen.dart';
@@ -90,6 +91,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: '/dashboard',
                 builder: (context, state) => const DashboardScreen(),
                 routes: [
+                  GoRoute(path: 'uncategorized', builder: (context, state) => const UncategorizedScreen()),
                   GoRoute(
                     path: 'accounts/:id',
                     builder: (context, state) => AccountScreen(
