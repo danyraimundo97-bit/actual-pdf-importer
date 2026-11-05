@@ -101,8 +101,14 @@ List<_Leaf> _leaves(LedgerTransaction t, Map<String, List<LedgerTransaction>> ch
 /// flow (income or spending).
 bool _isFlow(LedgerTransaction t) => t.transferId == null && !t.startingBalance;
 
-/// The on-budget flows, as leaves.
-List<_Leaf> _flows(List<LedgerAccount> accounts, List<LedgerTransaction> transactions) {
+/// The on-budget flows, as leaves. Leaves in a [notCounted] category (money
+/// moved between your own accounts, filed under "Between my accounts") aren't
+/// flows either.
+List<_Leaf> _flows(
+  List<LedgerAccount> accounts,
+  List<LedgerTransaction> transactions, {
+  Set<String> notCounted = const {},
+}) {
   final onBudget = {
     for (final a in accounts)
       if (!a.deleted && !a.closed && !a.offBudget) a.id,
@@ -110,7 +116,9 @@ List<_Leaf> _flows(List<LedgerAccount> accounts, List<LedgerTransaction> transac
   final shaped = _shape(transactions);
   return [
     for (final t in shaped.top)
-      if (onBudget.contains(t.accountId) && _isFlow(t)) ..._leaves(t, shaped.children),
+      if (onBudget.contains(t.accountId) && _isFlow(t))
+        for (final leaf in _leaves(t, shaped.children))
+          if (!notCounted.contains(leaf.categoryId)) leaf,
   ];
 }
 
@@ -133,19 +141,29 @@ MonthTransactions buildMonthTransactions({
   required Map<String, String> categoryNames,
   required Map<String, String> categoryEmojis,
   required Map<String, String> payeeNames,
+  Set<String> notCounted = const {},
 }) {
+  final shaped = _shape(transactions);
+  final parentOf = {
+    for (final e in shaped.children.entries)
+      for (final child in e.value) child.id: e.key,
+  };
   var income = 0;
   var spending = 0;
-  for (final f in _flows(accounts, transactions)) {
+  final incomeIds = <String>{};
+  final spendingIds = <String>{};
+  for (final f in _flows(accounts, transactions, notCounted: notCounted)) {
     if (_month(f.date) != month) continue;
+    final row = parentOf[f.id] ?? f.id;
     if (f.amountCents > 0) {
       income += f.amountCents;
-    } else {
+      incomeIds.add(row);
+    } else if (f.amountCents < 0) {
       spending -= f.amountCents;
+      spendingIds.add(row);
     }
   }
   final accountNames = {for (final a in accounts) a.id: a.name};
-  final shaped = _shape(transactions);
   final rows = shaped.top.where((t) => _month(t.date) == month).toList()
     ..sort((a, b) {
       final byDate = b.date.compareTo(a.date);
@@ -157,6 +175,8 @@ MonthTransactions buildMonthTransactions({
     month: month,
     incomeCents: income,
     spendingCents: spending,
+    incomeIds: incomeIds,
+    spendingIds: spendingIds,
     transactions: [
       for (final t in rows)
         AccountTransaction(
@@ -213,6 +233,7 @@ Dashboard buildLedgerDashboard({
   required Map<String, String> payeeNames,
   required DateTime today,
   int months = 6,
+  Set<String> notCounted = const {},
 }) {
   final open = [
     for (final a in accounts)
@@ -238,7 +259,7 @@ Dashboard buildLedgerDashboard({
   final netWorth = dashAccounts.fold(0, (sum, a) => sum + a.balanceCents);
 
   // All rows, not just [top]: a split's children carry its categories.
-  final flows = _flows(open, transactions);
+  final flows = _flows(open, transactions, notCounted: notCounted);
   final keys = ledgerMonthKeys(today, months);
   final income = {for (final k in keys) k: 0};
   final spending = {for (final k in keys) k: 0};
@@ -350,6 +371,7 @@ BudgetMonth buildLedgerBudgetMonth({
   required List<LedgerTransaction> transactions,
   required List<LedgerBudget> budgets,
   required DateTime today,
+  Set<String> notCounted = const {},
 }) {
   final expense = [
     for (final g in groups)
@@ -372,7 +394,7 @@ BudgetMonth buildLedgerBudgetMonth({
   final spent = <String, Map<String, int>>{};
   final received = <String, Map<String, int>>{};
   final flowMonths = <String>{};
-  for (final f in _flows(accounts, transactions)) {
+  for (final f in _flows(accounts, transactions, notCounted: notCounted)) {
     final c = f.categoryId;
     if (c == null) continue;
     final m = _month(f.date);

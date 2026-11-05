@@ -85,6 +85,17 @@ class AccountTransaction {
       );
 }
 
+/// Which of a month's transactions to show: all, or just what makes up
+/// Home's In or Out bar.
+enum MonthFlowFilter {
+  all,
+  income,
+  spending;
+
+  static MonthFlowFilter parse(String? name) =>
+      values.firstWhere((v) => v.name == name, orElse: () => MonthFlowFilter.all);
+}
+
 /// Every transaction of one month, across accounts. Totals as Home counts
 /// them: on-budget accounts, without transfers or opening balances.
 class MonthTransactions {
@@ -93,10 +104,28 @@ class MonthTransactions {
   final int spendingCents;
   final List<AccountTransaction> transactions;
 
+  /// The rows behind each total. A split with parts on both sides is in both.
+  final Set<String> incomeIds;
+  final Set<String> spendingIds;
+
   const MonthTransactions({
     required this.month,
     required this.incomeCents,
     required this.spendingCents,
     required this.transactions,
+    this.incomeIds = const {},
+    this.spendingIds = const {},
   });
+
+  List<AccountTransaction> rows(MonthFlowFilter filter) => switch (filter) {
+    MonthFlowFilter.all => transactions,
+    MonthFlowFilter.income => [
+      for (final t in transactions)
+        if (incomeIds.contains(t.id)) t,
+    ],
+    MonthFlowFilter.spending => [
+      for (final t in transactions)
+        if (spendingIds.contains(t.id)) t,
+    ],
+  };
 }

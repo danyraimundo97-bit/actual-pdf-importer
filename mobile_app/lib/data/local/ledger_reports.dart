@@ -35,6 +35,7 @@ class LedgerReports {
       payeeNames: await _store.payeeNames(scope),
       today: _now(),
       months: months,
+      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
     );
   }
 
@@ -49,9 +50,11 @@ class LedgerReports {
   /// [month] null = the current month.
   Future<BudgetMonth> budgetMonth(String scope, String? month) async {
     final today = _now();
+    final looks = await _categoryLooks(scope);
     return buildLedgerBudgetMonth(
       month: month ?? ledgerMonthKeys(today, 1).single,
-      categoryEmojis: _emojis(await _categoryLooks(scope)),
+      categoryEmojis: _emojis(looks),
+      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
       style: BudgetStyle.parse(await _store.budgetMode(scope)),
       groups: await _budgetGroups(scope),
       accounts: await _store.accounts(scope),
@@ -71,6 +74,7 @@ class LedgerReports {
       categoryNames: _names(looks),
       categoryEmojis: _emojis(looks),
       payeeNames: await _store.payeeNames(scope),
+      notCounted: _notCounted(looks, await _betweenAccountsCategories(scope)),
     );
   }
 
@@ -209,6 +213,29 @@ class LedgerReports {
         c.id: look(c.name, linked[c.id] ?? byName[_nameKey(splitCategoryName(c.name).name)]),
     };
   }
+
+  /// The category for money moved between your own accounts: the phone's
+  /// "Between my accounts" preset, or the Actual categories matched to it.
+  Future<Set<String>> _betweenAccountsCategories(String scope) async {
+    final preset = await (_db.select(_db.categories)..where((c) => c.presetKey.equals(_betweenAccountsPreset))).getSingleOrNull();
+    if (preset == null) return const {};
+    if (scope == phoneScope) return {preset.id};
+    final links = await (_db.select(
+      _db.categoryLinks,
+    )..where((l) => l.budgetSyncId.equals(scope) & l.categoryId.equals(preset.id))).get();
+    return {for (final l in links) l.actualCategoryId};
+  }
+
+  /// [linked], plus an Actual category that goes by that name without having
+  /// been matched. Never renames or touches the category itself.
+  Set<String> _notCounted(Map<String, _CategoryLook> looks, Set<String> linked) => {
+    ...linked,
+    for (final e in looks.entries)
+      if (_betweenAccountsNames.contains(_nameKey(e.value.name))) e.key,
+  };
+
+  static const _betweenAccountsPreset = 'money.between_accounts';
+  static const _betweenAccountsNames = {'between my accounts', 'entre contas'};
 
   static String _nameKey(String name) => foldAccents(name).trim().toLowerCase();
 

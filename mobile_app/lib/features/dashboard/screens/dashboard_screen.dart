@@ -9,6 +9,7 @@ import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/ledger_sync_controller.dart';
 import '../../../data/models/budget_month.dart';
+import '../../../data/models/account_page.dart';
 import '../../../data/models/dashboard.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/category_emoji.dart';
@@ -748,6 +749,15 @@ class _FlowChart extends StatelessWidget {
                 ),
               ),
               barTouchData: BarTouchData(
+                // The bars are thin: give a finger some room, mostly above
+                // them, without reaching the bar beside it (3 apart).
+                touchExtraThreshold: const EdgeInsets.fromLTRB(1, 24, 1, 8),
+                touchCallback: (event, response) {
+                  final spot = response?.spot;
+                  if (event is! FlTapUpEvent || spot == null) return;
+                  final flow = spot.touchedRodDataIndex == 0 ? MonthFlowFilter.income : MonthFlowFilter.spending;
+                  context.push('/dashboard/transactions?month=${months[spot.touchedBarGroupIndex].month}&flow=${flow.name}');
+                },
                 touchTooltipData: BarTouchTooltipData(
                   getTooltipColor: (_) => colors.inverseSurface,
                   getTooltipItem: (group, groupIndex, rod, rodIndex) {

@@ -21,7 +21,10 @@ class MonthTransactionsScreen extends ConsumerStatefulWidget {
   /// `YYYY-MM`; null = this month.
   final String? month;
 
-  const MonthTransactionsScreen({super.key, this.month});
+  /// Just what makes up Home's In or Out bar, when opened from one.
+  final MonthFlowFilter filter;
+
+  const MonthTransactionsScreen({super.key, this.month, this.filter = MonthFlowFilter.all});
 
   @override
   ConsumerState<MonthTransactionsScreen> createState() => _MonthTransactionsScreenState();
@@ -39,7 +42,13 @@ class _MonthTransactionsScreenState extends ConsumerState<MonthTransactionsScree
   Widget build(BuildContext context) {
     final data = ref.watch(monthTransactionsProvider(_month));
     return Scaffold(
-      appBar: AppBar(title: const Text('Transactions')),
+      appBar: AppBar(
+        title: Text(switch (widget.filter) {
+          MonthFlowFilter.all => 'Transactions',
+          MonthFlowFilter.income => 'Money in',
+          MonthFlowFilter.spending => 'Money out',
+        }),
+      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -60,7 +69,7 @@ class _MonthTransactionsScreenState extends ConsumerState<MonthTransactionsScree
                   await ref.read(ledgerSyncProvider.notifier).syncNow();
                   return ref.refresh(monthTransactionsProvider(_month).future);
                 },
-                child: _MonthList(data: month),
+                child: _MonthList(data: month, filter: widget.filter),
               ),
             ),
           ),
@@ -105,12 +114,14 @@ class _MonthSwitcher extends StatelessWidget {
 
 class _MonthList extends StatelessWidget {
   final MonthTransactions data;
+  final MonthFlowFilter filter;
 
-  const _MonthList({required this.data});
+  const _MonthList({required this.data, required this.filter});
 
   @override
   Widget build(BuildContext context) {
-    final count = data.transactions.length;
+    final rows = data.rows(filter);
+    final count = rows.length;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       // Bottom: room for the quick-add button.
@@ -133,14 +144,16 @@ class _MonthList extends StatelessWidget {
                   style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
                 ),
                 const SizedBox(height: Space.xs),
-                Text(
-                  'In ${formatCents(data.incomeCents)}  ·  Out ${formatCents(-data.spendingCents)}',
-                  style: figures(context.text.bodyLarge).copyWith(fontWeight: FontWeight.w500),
-                ),
+                Text(switch (filter) {
+                  MonthFlowFilter.all =>
+                    'In ${formatCents(data.incomeCents)}  ·  Out ${formatCents(-data.spendingCents)}',
+                  MonthFlowFilter.income => 'In ${formatCents(data.incomeCents)}',
+                  MonthFlowFilter.spending => 'Out ${formatCents(-data.spendingCents)}',
+                }, style: figures(context.text.bodyLarge).copyWith(fontWeight: FontWeight.w500)),
               ],
             ),
           ),
-          ...transactionRowsWithDayHeaders(data.transactions),
+          ...transactionRowsWithDayHeaders(rows),
         ],
       ],
     );

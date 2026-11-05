@@ -64,6 +64,8 @@ const presetGroups = <PresetGroup>[
     PresetCategory('money.taxes', 'Taxes', '🏛️'),
     PresetCategory('money.savings', 'Savings & investments', '💰'),
     PresetCategory('money.transfers', 'Transfers', '💸'),
+    // Doesn't count towards income, spending or the budget (LedgerReports).
+    PresetCategory('money.between_accounts', 'Between my accounts', '🔁'),
   ]),
   PresetGroup('income', 'Income', [
     PresetCategory('income.salary', 'Salary', '💼'),

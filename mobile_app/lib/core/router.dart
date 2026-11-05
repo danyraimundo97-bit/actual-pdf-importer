@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../data/models/account_page.dart';
 import '../data/providers.dart';
 import 'log/error_hooks.dart';
 import '../features/accounts/screens/accounts_settings_screen.dart';
@@ -104,6 +105,13 @@ final routerProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) => const DashboardScreen(),
                 routes: [
                   GoRoute(path: 'uncategorized', builder: (context, state) => const UncategorizedScreen()),
+                  GoRoute(
+                    path: 'transactions',
+                    builder: (context, state) => MonthTransactionsScreen(
+                      month: state.uri.queryParameters['month'],
+                      filter: MonthFlowFilter.parse(state.uri.queryParameters['flow']),
+                    ),
+                  ),
                   GoRoute(
                     path: 'accounts/:id',
                     builder: (context, state) => AccountScreen(
