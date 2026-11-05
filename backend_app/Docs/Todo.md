@@ -33,6 +33,9 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
   amounts in an encrypted database, so Home and Budget work without Actual, and syncs both ways with
   Actual once it's connected. Budget style is a setting (simple monthly limits or envelopes),
   explained in the guide.
+- **Statistics page.** A new page with plenty of different dashboards, beyond what Home shows.
+- **Make the Budget page easier to read.** It packs in too much information at once: show less per
+  category and make it less intense to look at.
 
 ## 2. Backend as the Actual gateway
 
@@ -53,6 +56,7 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
 "PDF importer" is everywhere: the repository, the "Connect to your importer" screen, the
 `X-Import-Token` header, the docs.
 
+- **Give the app a name.** It still shows up on the phone as `mobile_app`.
 - **Don't change the `pdfimport-` prefix** of `imported_id`s: every past import would come back as
   duplicates.
 - Renaming the token header breaks existing installs unless the backend accepts both names during
