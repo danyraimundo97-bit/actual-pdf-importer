@@ -6,7 +6,6 @@ import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/log/app_log.dart';
-import '../../../data/local/ledger_store.dart';
 import '../../../data/models/budget_month.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
@@ -67,12 +66,14 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       currentCents: category.budgetedCents,
     );
     if (cents == null || cents == category.budgetedCents) return;
-    await ref.read(ledgerStoreProvider).setBudget(phoneScope, category.id, month, cents);
+    final scope = await ref.read(ledgerScopeProvider.future);
+    await ref.read(ledgerStoreProvider).setBudget(scope, category.id, month, cents);
     _log.info('Budget amount set', {'category': category.id, 'month': month});
   }
 
   Future<void> _copyLastMonth(String month) async {
-    final copied = await ref.read(ledgerStoreProvider).copyPreviousMonth(phoneScope, month);
+    final scope = await ref.read(ledgerScopeProvider.future);
+    final copied = await ref.read(ledgerStoreProvider).copyPreviousMonth(scope, month);
     _log.info("Last month's budget copied", {'month': month, 'categories': copied});
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -124,8 +125,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                   onPhone: onPhone,
                   collapsed: _collapsed,
                   onToggle: _toggle,
-                  onEdit: onPhone ? (c) => _edit(data.month, c) : null,
-                  onCopyLastMonth: onPhone ? () => _copyLastMonth(data.month) : null,
+                  onEdit: (c) => _edit(data.month, c),
+                  onCopyLastMonth: () => _copyLastMonth(data.month),
                 ),
               ),
             ),

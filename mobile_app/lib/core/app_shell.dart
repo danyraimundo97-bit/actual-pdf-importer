@@ -93,6 +93,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         ref.read(ledgerSyncProvider.notifier).syncNow();
       }
     });
+    // A new change on the phone goes to Actual shortly (local ledger, Phase 5).
+    ref.listen(ledgerOutboxProvider, (previous, next) {
+      final waiting = next.valueOrNull?.waiting ?? 0;
+      if (waiting > (previous?.valueOrNull?.waiting ?? 0)) ref.read(ledgerSyncProvider.notifier).request();
+    });
     ref.listen(categoryMemoryRevisionProvider, (_, _) => ref.read(categorySyncProvider.notifier).request());
     ref.listen(databaseWasResetProvider, (previous, next) {
       if (next && previous != true) _explainDatabaseReset();

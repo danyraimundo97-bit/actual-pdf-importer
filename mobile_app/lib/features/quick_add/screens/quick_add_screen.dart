@@ -2,18 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/errors/api_exception.dart';
+import '../../../core/log/app_log.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/local/ledger_store.dart';
 import '../../../data/models/quick_add.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/busy_button.dart';
 import '../../../shared/widgets/category_picker_sheet.dart';
-import '../../../shared/widgets/connect_actual_state.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/error_retry.dart';
 import '../../../shared/widgets/inline_note.dart';
 import '../../../shared/widgets/labeled_field.dart';
+import '../../accounts/widgets/account_sheet.dart';
 import '../quick_add_controller.dart';
+
+const _log = AppLog('quick-add');
 
 /// Add a transaction in seconds (e.g. a cash purchase): amount first, with
 /// the keyboard already open, then payee (suggested from recent ones, which
@@ -23,24 +28,15 @@ class QuickAddScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final link = ref.watch(linkStateProvider).valueOrNull;
     final options = ref.watch(quickAddOptionsProvider);
-
-    Widget body;
-    if (link != null && link != LinkState.ready) {
-      body = ConnectActualState(state: link);
-    } else {
-      body = options.when(
-        data: (o) => _QuickAddForm(options: o),
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => isActualNotConnected(e)
-            ? const ConnectActualState(state: LinkState.noActual)
-            : ErrorRetry(
-                message: e is ApiException ? e.message : 'Could not load your accounts and categories.',
-                onRetry: () => ref.invalidate(quickAddOptionsProvider),
-              ),
-      );
-    }
+    final body = options.when(
+      data: (o) => _QuickAddForm(options: o),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => ErrorRetry(
+        message: e is ApiException ? e.message : 'Could not load your accounts and categories.',
+        onRetry: () => ref.invalidate(quickAddOptionsProvider),
+      ),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -69,9 +65,30 @@ class _QuickAddFormState extends ConsumerState<_QuickAddForm> {
   @override
   void initState() {
     super.initState();
+    _applyOptions();
+  }
+
+  @override
+  void didUpdateWidget(_QuickAddForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // An account was just added here.
+    if (oldWidget.options != widget.options) _applyOptions();
+  }
+
+  void _applyOptions() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(quickAddControllerProvider.notifier).applyOptions(widget.options);
     });
+  }
+
+  Future<void> _addAccount() async {
+    final edit = await showAccountSheet(context);
+    if (edit == null) return;
+    final id = await ref
+        .read(ledgerStoreProvider)
+        .createAccount(phoneScope, name: edit.name, offBudget: edit.offBudget, openingBalanceCents: edit.balanceCents);
+    _log.info('Account added', {'account': id});
+    ref.invalidate(quickAddOptionsProvider);
   }
 
   QuickAddController get _controller => ref.read(quickAddControllerProvider.notifier);
@@ -113,9 +130,20 @@ class _QuickAddFormState extends ConsumerState<_QuickAddForm> {
     final options = widget.options;
 
     if (options.accounts.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(Space.gutter),
-        child: Text('This budget has no open accounts yet. Create one in Actual first.', style: muted),
+      final onPhone = ref.watch(readsLedgerProvider).valueOrNull ?? true;
+      if (!onPhone) {
+        return Padding(
+          padding: const EdgeInsets.all(Space.gutter),
+          child: Text('This budget has no open accounts yet. Create one in Actual first.', style: muted),
+        );
+      }
+      return EmptyState(
+        icon: Icons.account_balance_outlined,
+        title: 'Add an account first',
+        message: 'A transaction goes into an account. Add one to keep on this phone.',
+        actionLabel: 'Add account',
+        actionIcon: Icons.add_rounded,
+        onAction: _addAccount,
       );
     }
 

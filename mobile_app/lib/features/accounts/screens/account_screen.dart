@@ -7,6 +7,7 @@ import '../../../core/format/money.dart';
 import '../../../core/log/app_log.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/account_page.dart';
+import '../../../data/local/ledger_store.dart';
 import '../../../data/providers.dart';
 import '../../../shared/widgets/connect_actual_state.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -50,15 +51,17 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     super.dispose();
   }
 
-  /// The phone's own rows: change or remove one. The list reloads by
-  /// itself (the controller watches the ledger).
+  /// Change or remove a row, on the phone's own budget or a copy of an Actual
+  /// one (the sync sends it). The list reloads by itself (the controller
+  /// watches the ledger).
   Future<void> _edit(AccountTransaction tx) async {
     final store = ref.read(ledgerStoreProvider);
     final row = await store.transaction(tx.id);
-    final groups = await ref
-        .read(localCategoryStoreProvider)
-        .groups(budgetSyncId: ref.read(appConfigProvider).budgetSyncId);
-    if (row == null || !mounted) return;
+    if (row == null) return;
+    final groups = row.scope == phoneScope
+        ? await ref.read(localCategoryStoreProvider).groups(budgetSyncId: ref.read(appConfigProvider).budgetSyncId)
+        : await ref.read(ledgerReportsProvider).categoryPicker(row.scope);
+    if (!mounted) return;
     final action = await showLedgerTransactionSheet(
       context,
       current: (
@@ -129,7 +132,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     : 'Transactions added to this account in Actual, imported or added here show up in this list.',
               )
             else
-              ..._rowsWithDayHeaders(context, state.rows, editable: state.onPhone),
+              ..._rowsWithDayHeaders(context, state.rows),
             if (state.loadingMore)
               const Padding(
                 padding: EdgeInsets.all(Space.lg),
@@ -147,7 +150,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     return Scaffold(appBar: AppBar(title: Text(title)), body: body);
   }
 
-  List<Widget> _rowsWithDayHeaders(BuildContext context, List<AccountTransaction> rows, {required bool editable}) {
+  List<Widget> _rowsWithDayHeaders(BuildContext context, List<AccountTransaction> rows) {
     final out = <Widget>[];
     DateTime? day;
     for (final tx in rows) {
@@ -157,7 +160,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       }
       // Transfers and splits are read-only on the phone; the opening balance
       // is changed in Settings › Accounts.
-      final canEdit = editable && !tx.transfer && tx.splits.isEmpty && !tx.openingBalance;
+      final canEdit = !tx.transfer && tx.splits.isEmpty && !tx.openingBalance;
       out.add(_TransactionRow(tx: tx, onTap: canEdit ? () => _edit(tx) : null));
     }
     return out;

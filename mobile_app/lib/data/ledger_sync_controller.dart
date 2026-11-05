@@ -22,9 +22,10 @@ class LedgerSyncStatus {
 }
 
 /// Runs [LedgerSync] for the connected budget, one run at a time
-/// (docs/plans/local-ledger.md, Phase 5). Triggered like the category sync:
-/// on start and connection changes (AppShell), after an import or a quick
-/// add ([request]), and by pull-to-refresh ([syncNow]). Without Actual it
+/// (docs/plans/local-ledger.md, Phase 5): first the phone's changes go up,
+/// then Actual's come down. Triggered like the category sync: on start and
+/// connection changes, shortly after a change waits to be sent (AppShell),
+/// and by pull-to-refresh ([syncNow]). Without Actual it
 /// does nothing: the phone's own budget has nothing to sync with yet.
 class LedgerSyncController extends Notifier<LedgerSyncStatus> {
   Timer? _debounce;
@@ -45,6 +46,13 @@ class LedgerSyncController extends Notifier<LedgerSyncStatus> {
     ref.read(appDatabaseProvider),
     (budgetSyncId, epoch, lastId) =>
         ref.read(ledgerApiProvider).pull(budgetSyncId: budgetSyncId, epoch: epoch, lastId: lastId),
+    send: (budgetSyncId, entries) async => ref
+        .read(ledgerApiProvider)
+        .push(
+          budgetSyncId: budgetSyncId,
+          budgetPassword: await ref.read(secretStoreProvider).budgetPassword(budgetSyncId),
+          entries: entries,
+        ),
   );
 
   void request({Duration delay = const Duration(seconds: 2)}) {
@@ -52,7 +60,7 @@ class LedgerSyncController extends Notifier<LedgerSyncStatus> {
     _debounce = Timer(delay, syncNow);
   }
 
-  /// Pulls now, or once more after the run in progress. Never throws; the
+  /// Sends the phone's changes and pulls now, or once more after the run in progress. Never throws; the
   /// outcome is in [state].
   Future<void> syncNow() async {
     _debounce?.cancel();
@@ -90,7 +98,9 @@ class LedgerSyncController extends Notifier<LedgerSyncStatus> {
     state = LedgerSyncStatus(running: true, lastPulledAt: state.lastPulledAt ?? await _sync().lastPulledAt(scope));
     _lastFailure = null;
     try {
-      await _sync().pull(scope);
+      final sync = _sync();
+      await sync.push(scope);
+      await sync.pull(scope);
       state = LedgerSyncStatus(lastPulledAt: await _sync().lastPulledAt(scope));
     } on ApiException catch (e) {
       _lastFailure = e;

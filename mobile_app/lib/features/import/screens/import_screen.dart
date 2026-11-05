@@ -206,6 +206,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
             budgetSyncId: phone == null ? config.budgetSyncId : null,
             addedIds: result.addedIds,
             onPhone: phone != null,
+            inLedger: result.inLedger,
           ),
         );
     if (phone != null) return;
@@ -248,7 +249,7 @@ class _ImportScreenState extends ConsumerState<ImportScreen> {
       ),
     );
     if (confirmed != true) return;
-    if (entry.onPhone) {
+    if (entry.onPhone || entry.inLedger) {
       final outcome = await ref.read(ledgerStoreProvider).deleteTransactions(entry.addedIds);
       _log.info('Saved statement removed', {
         'accountId': entry.accountId,

@@ -195,12 +195,205 @@ void main() {
     expect(await store.budgetMode(budget), 'tracking');
   });
 
+  group('push', () {
+    final sent = <List<Map<String, dynamic>>>[];
+    late List<Map<String, dynamic>> Function(List<Map<String, dynamic>> entries) answer;
+
+    setUp(() {
+      sent.clear();
+      // Actual takes everything and gives new rows ids of its own.
+      answer = (entries) => [
+        for (final e in entries)
+          {
+            'seq': e['seq'],
+            'ok': true,
+            if (RegExp(r'^(tx|acct|payee):').hasMatch('${e['id']}')) 'id': 'actual-${e['id']}'.replaceAll(':', '-'),
+          },
+      ];
+    });
+
+    LedgerSync pusher() => LedgerSync(
+      db,
+      (_, _, _) async => responses.removeAt(0),
+      send: (budgetSyncId, entries) async {
+        expect(budgetSyncId, budget);
+        sent.add(entries);
+        return answer(entries);
+      },
+      now: () => DateTime(2026, 10, 20, 12),
+    );
+
+    Future<String> pulledAccount() async {
+      responses.add(pull(transactions: [tx('t1', cents: -1000)]));
+      await sync().pull(budget);
+      return 'chk';
+    }
+
+    test('nothing waiting sends nothing', () async {
+      await pulledAccount();
+      expect(await pusher().push(budget), (sent: 0, failed: 0));
+      expect(sent, isEmpty);
+    });
+
+    test('a new row goes up, takes Actual\'s id, and old ids still find it', () async {
+      final account = await pulledAccount();
+      final id = await store.addTransaction(
+        account,
+        LedgerDraft(
+          date: DateTime(2026, 10, 5),
+          amountCents: -450,
+          payee: 'New place',
+          categoryId: 'groceries',
+          importedId: 'app-client-1',
+        ),
+      );
+      expect(await store.outbox(budget), hasLength(2)); // the payee and the row
+
+      expect(await pusher().push(budget), (sent: 2, failed: 0));
+      final entries = sent.single;
+      expect([for (final e in entries) e['kind']], ['payee', 'transaction']);
+      expect(entries.last['importedId'], 'app-client-1');
+      expect(entries.last['payeeName'], 'New place');
+      expect(entries.last.containsKey('amountCents'), isTrue);
+
+      expect(await store.outbox(budget), isEmpty);
+      final row = (await store.transaction(id!))!;
+      expect(row.id, 'actual-${id.replaceAll(':', '-')}');
+      expect(row.payeeId, startsWith('actual-payee-'));
+      expect(await store.currentId(id), row.id);
+    });
+
+    test('an edited old row uses a new payee: the payee is sent first', () async {
+      await pulledAccount();
+      await store.updateTransaction('t1', amountCents: -2000);
+      await store.updateTransaction('t1', payee: 'Later payee');
+      await pusher().push(budget);
+      expect([for (final e in sent.single) e['kind']], ['payee', 'transaction']);
+      expect((await store.transaction('t1'))!.payeeId, startsWith('actual-payee-'));
+    });
+
+    test('a refused entry stays with its code; the rest go, and it shows as failed', () async {
+      await pulledAccount();
+      await store.setBudget(budget, 'groceries', '2026-10', 30000);
+      await store.updateTransaction('t1', amountCents: -2000);
+      answer = (entries) => [
+        for (final e in entries)
+          e['kind'] == 'budget'
+              ? {'seq': e['seq'], 'ok': false, 'code': 'ACTUAL_REJECTED'}
+              : {'seq': e['seq'], 'ok': true},
+      ];
+
+      expect(await pusher().push(budget), (sent: 2, failed: 1));
+      final left = (await store.outbox(budget)).single;
+      expect((left.kind, left.lastError, left.attempts), ('budget', 'ACTUAL_REJECTED', 1));
+      expect(await store.watchOutboxSummary(budget).first, (waiting: 1, failed: 1));
+
+      // A pull keeps the phone's amount while it waits.
+      responses.add(pull(full: false, budgets: [
+        {'month': '2026-10', 'categoryId': 'groceries', 'budgetedCents': 100, 'carryover': false},
+      ]));
+      await pusher().pull(budget);
+      expect((await store.budgets(budget, '2026-10'))['groceries'], 30000);
+
+      // Changing it again clears the code until the next answer.
+      await store.setBudget(budget, 'groceries', '2026-10', 31000);
+      expect(await store.watchOutboxSummary(budget).first, (waiting: 1, failed: 0));
+    });
+
+    test('no answer at all: nothing is lost, and the next run sends it again', () async {
+      await pulledAccount();
+      await store.updateTransaction('t1', amountCents: -2000);
+      final failing = LedgerSync(db, (_, _, _) async => {}, send: (_, _) => throw StateError('offline'));
+      await expectLater(failing.push(budget), throwsStateError);
+      expect(await store.outbox(budget), hasLength(1));
+      expect((await store.outbox(budget)).single.lastError, isNull);
+
+      expect(await pusher().push(budget), (sent: 1, failed: 0));
+      expect(await store.outbox(budget), isEmpty);
+    });
+
+    test('a change made while the push is on its way goes in the next run', () async {
+      final account = await pulledAccount();
+      final id = await store.addTransaction(account, LedgerDraft(date: DateTime(2026, 10, 5), amountCents: -450));
+      final during = LedgerSync(
+        db,
+        (_, _, _) async => {},
+        send: (_, entries) async {
+          await store.updateTransaction(id!, amountCents: -999);
+          return answer(entries);
+        },
+      );
+      await during.push(budget);
+
+      final left = (await store.outbox(budget)).single;
+      final row = (await store.transaction(id!))!;
+      expect(left.rowId, row.id, reason: 'under the new id');
+      expect(row.amountCents, -999);
+      expect(row.id, isNot(id));
+
+      await pusher().push(budget);
+      expect(sent.single.single['amountCents'], -999);
+      expect(await store.outbox(budget), isEmpty);
+    });
+
+    test('a row removed before it was ever sent never reaches Actual', () async {
+      final account = await pulledAccount();
+      final id = await store.addTransaction(account, LedgerDraft(date: DateTime(2026, 10, 5), amountCents: -450));
+      await store.deleteTransaction(id!);
+      expect(await pusher().push(budget), (sent: 0, failed: 0));
+      expect(sent, isEmpty);
+      expect(await store.outbox(budget), isEmpty);
+    });
+
+    test('a removal goes up by id; gone in Actual marks the row removed here', () async {
+      responses.add(pull(transactions: [tx('t1'), tx('t2')]));
+      await sync().pull(budget);
+      await store.deleteTransaction('t1');
+      await store.updateTransaction('t2', amountCents: -2000);
+      answer = (entries) => [
+        for (final e in entries) {'seq': e['seq'], 'ok': true, if (e['id'] == 't2') 'gone': true},
+      ];
+      await pusher().push(budget);
+      expect(sent.single.first, {'seq': sent.single.first['seq'], 'kind': 'transaction', 'op': 'delete', 'id': 't1'});
+      expect((await store.transaction('t2'))!.deleted, isTrue);
+    });
+
+    test("Actual matched the line to a row the phone already has: one row remains", () async {
+      await pulledAccount();
+      final id = await store.addTransaction(
+        'chk',
+        LedgerDraft(date: DateTime(2026, 10, 3), amountCents: -1000, importedId: 'pdfimport-x'),
+      );
+      answer = (entries) => [
+        for (final e in entries) {'seq': e['seq'], 'ok': true, 'id': 't1'},
+      ];
+      await pusher().push(budget);
+      expect([for (final t in await live()) t.id], ['t1']);
+      expect(await store.currentId(id!), 't1');
+    });
+
+    test('a new account takes Actual\'s id, with its rows and opening balance', () async {
+      await pulledAccount();
+      final id = await store.createAccount(budget, name: 'Cash', openingBalanceCents: 5000, openedOn: DateTime(2026, 10, 1));
+      final entered = await store.addTransaction(id, LedgerDraft(date: DateTime(2026, 10, 2), amountCents: -100));
+
+      await pusher().push(budget);
+      expect([for (final e in sent.single) e['kind']], ['account', 'transaction', 'transaction']);
+      expect(sent.single[1]['startingBalance'], isTrue);
+
+      final account = (await store.account(id))!;
+      expect(account.id, 'actual-${id.replaceAll(':', '-')}');
+      expect((await store.transaction(entered!))!.accountId, account.id);
+      expect(await store.openingBalance(id), 5000);
+    });
+  });
+
   test('upgrading from schema 3 keeps the rows and allows a repeated importedId', () async {
     final dir = Directory.systemTemp.createTempSync('ledger-migration-4-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final file = File('${dir.path}/app.sqlite');
 
-    // A schema 4 file made to look like schema 3: the categories table
+    // A current file made to look like schema 3: the newer tables and column
     // dropped, and the transactions table back to its schema 3 form.
     final current = AppDatabase(NativeDatabase(file));
     final id = await LedgerStore(current).createAccount(phoneScope, name: 'Checking', openingBalanceCents: 100);
@@ -209,6 +402,8 @@ void main() {
     final ddl = raw.select("SELECT sql FROM sqlite_master WHERE name = 'ledger_transactions'").single['sql'] as String;
     raw
       ..execute('DROP TABLE ledger_categories')
+      ..execute('DROP TABLE ledger_id_aliases')
+      ..execute('ALTER TABLE ledger_outbox DROP COLUMN revision')
       ..execute('DROP INDEX ledger_transactions_account_imported')
       ..execute('ALTER TABLE ledger_transactions RENAME TO old_transactions')
       ..execute('${ddl.substring(0, ddl.lastIndexOf(')'))}, UNIQUE(account_id, imported_id))')

@@ -12,12 +12,18 @@ class ImportResult {
   /// then counts lines already on the phone, and [addedIds] are ledger ids.
   final ({String id, String name})? phoneAccount;
 
+  /// Written to the phone's copy of the Actual budget first; the sync takes
+  /// it to Actual. [addedIds] are then ledger ids, and undoing goes through
+  /// the ledger too.
+  final bool inLedger;
+
   const ImportResult({
     required this.added,
     required this.updated,
     required this.categorized,
     this.addedIds = const [],
     this.phoneAccount,
+    this.inLedger = false,
   });
 
   bool get onPhone => phoneAccount != null;

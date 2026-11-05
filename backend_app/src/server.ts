@@ -39,6 +39,7 @@ import { addManualTransaction, getQuickAddOptions, parseManualTransaction } from
 import { getAccountPage, parseLimit } from './account-page';
 import { getBudgetMonth, parseMonth } from './budget-month';
 import { defaultEpochsFile, LedgerEpochs, pullLedger } from './ledger';
+import { defaultClientIdsFile, LedgerClientIds, MAX_PUSH_ENTRIES, pushLedger } from './ledger-push';
 import { BudgetRef, createBudgetSession } from './budget-session';
 import {
   clearCategoryMappings,
@@ -74,7 +75,8 @@ const log = logger.child({ area: 'app' });
 const app = express();
 // First, so every request (rejected ones included) gets an id and a log line.
 app.use(requestLogger());
-app.use(express.json());
+// A ledger push can carry a few hundred rows (POST /ledger/push).
+app.use(express.json({ limit: '2mb' }));
 
 // The Actual server is optional (actual-connection.ts): from .env (locked),
 // from what the app saved, or none. Server credentials don't vary per
@@ -518,6 +520,36 @@ app.get('/ledger/pull', async (req: Request, res: Response) => {
     sendJsonMaybeGzipped(req, res, pull);
   } catch (err) {
     sendImporterError(res, err, 'Internal error while reading the budget for the phone.');
+  }
+});
+
+const ledgerClientIds = new LedgerClientIds(defaultClientIdsFile());
+
+/** The phone's outbox, answered entry by entry (ledger-push.ts). */
+app.post('/ledger/push', async (req: Request, res: Response) => {
+  const { entries, budgetSyncId, budgetPassword } = req.body ?? {};
+  if (!Array.isArray(entries)) {
+    return res.status(400).json({ error: 'Missing "entries" array.', code: 'MISSING_FIELD' });
+  }
+  try {
+    if (entries.length > MAX_PUSH_ENTRIES) throw new InvalidFieldError('entries', `more than ${MAX_PUSH_ENTRIES}`);
+    const budget = resolveBudgetRef(budgetSyncId, budgetPassword);
+    const push = await pushLedger(budgetSession, budget, entries, ledgerClientIds);
+    const removedAt = new Date().toISOString();
+    recordRemovals(push.softDeleted.map((t) => ({ ...t, budgetSyncId: budget.syncId, removedAt })));
+    for (const { payee, categoryId } of push.learned) rememberCategory(payee, categoryId, undefined, budget.syncId);
+    log.info(
+      {
+        budgetSyncId: budget.syncId,
+        sent: entries.length,
+        applied: push.results.filter((r) => r.ok).length,
+        failed: push.results.filter((r) => !r.ok).length,
+      },
+      'Ledger pushed',
+    );
+    res.json({ results: push.results });
+  } catch (err) {
+    sendImporterError(res, err, 'Internal error while sending the phone\'s changes to the budget.');
   }
 });
 

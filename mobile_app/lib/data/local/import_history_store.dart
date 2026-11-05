@@ -24,6 +24,10 @@ class ImportHistoryEntry {
   /// removes the ledger rows.
   final bool onPhone;
 
+  /// Went into the phone's copy of the Actual budget, then Actual through
+  /// the sync: undoing removes the ledger rows, and the sync sends that.
+  final bool inLedger;
+
   /// Set once the import was undone; the entry stays, marked as such.
   final DateTime? undoneAt;
 
@@ -38,6 +42,7 @@ class ImportHistoryEntry {
     this.budgetSyncId,
     this.addedIds = const [],
     this.onPhone = false,
+    this.inLedger = false,
     this.undoneAt,
   });
 
@@ -54,6 +59,7 @@ class ImportHistoryEntry {
     budgetSyncId: budgetSyncId,
     addedIds: addedIds,
     onPhone: onPhone,
+    inLedger: inLedger,
     undoneAt: when,
   );
 
@@ -68,6 +74,7 @@ class ImportHistoryEntry {
     if (budgetSyncId != null) 'budgetSyncId': budgetSyncId,
     'addedIds': addedIds,
     if (onPhone) 'onPhone': true,
+    if (inLedger) 'inLedger': true,
     if (undoneAt != null) 'undoneAt': undoneAt!.toIso8601String(),
   };
 
@@ -82,6 +89,7 @@ class ImportHistoryEntry {
     budgetSyncId: json['budgetSyncId'] as String?,
     addedIds: (json['addedIds'] as List?)?.cast<String>() ?? const [],
     onPhone: json['onPhone'] as bool? ?? false,
+    inLedger: json['inLedger'] as bool? ?? false,
     undoneAt: json['undoneAt'] == null ? null : DateTime.parse(json['undoneAt'] as String),
   );
 }

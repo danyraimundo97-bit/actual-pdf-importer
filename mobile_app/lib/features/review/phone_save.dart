@@ -20,13 +20,17 @@ LedgerAccount? suggestLedgerAccount(List<LedgerAccount> open, {required String b
 
 /// The selected lines as ledger drafts. The importedId is the statement's,
 /// whatever was edited, so saving the same statement again adds nothing.
-List<LedgerDraft> statementDrafts(List<ParsedTransaction> included) => [
+///
+/// With [keepLines] each keeps its statement line as the note, as an import
+/// into Actual always has.
+List<LedgerDraft> statementDrafts(List<ParsedTransaction> included, {bool keepLines = false}) => [
   for (final t in included)
     LedgerDraft(
       date: t.date,
       amountCents: t.amountCents,
       payee: t.payee,
       categoryId: t.effectiveCategoryId,
+      notes: keepLines ? t.rawLine : null,
       importedId: t.importedId,
     ),
 ];

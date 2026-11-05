@@ -84,6 +84,7 @@ class PayeeCategories extends Table {
     LedgerOutbox,
     LedgerSyncState,
     LedgerCategories,
+    LedgerIdAliases,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -92,7 +93,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -109,25 +110,33 @@ class AppDatabase extends _$AppDatabase {
           ledgerOutbox,
           ledgerSyncState,
           ledgerCategories,
+          ledgerIdAliases,
         ]) {
           await m.createTable(table);
         }
         for (final index in [ledgerTransactionsAccountDate, ledgerTransactionsScopeDate, ledgerTransactionsAccountImported]) {
           await m.createIndex(index);
         }
-      } else if (from < 4) {
-        // The sync with Actual (Phase 5): an Actual budget's categories, and
-        // importedId no longer unique (rebuilding the table drops the
-        // constraint; its indexes are made again if the rebuild lost them).
-        await m.alterTable(TableMigration(ledgerTransactions));
-        await customStatement(
-          'CREATE INDEX IF NOT EXISTS ledger_transactions_account_date ON ledger_transactions (account_id, date)',
-        );
-        await customStatement(
-          'CREATE INDEX IF NOT EXISTS ledger_transactions_scope_date ON ledger_transactions (scope, date)',
-        );
-        await m.createIndex(ledgerTransactionsAccountImported);
-        await m.createTable(ledgerCategories);
+      } else {
+        if (from < 4) {
+          // The sync with Actual (Phase 5): an Actual budget's categories, and
+          // importedId no longer unique (rebuilding the table drops the
+          // constraint; its indexes are made again if the rebuild lost them).
+          await m.alterTable(TableMigration(ledgerTransactions));
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS ledger_transactions_account_date ON ledger_transactions (account_id, date)',
+          );
+          await customStatement(
+            'CREATE INDEX IF NOT EXISTS ledger_transactions_scope_date ON ledger_transactions (scope, date)',
+          );
+          await m.createIndex(ledgerTransactionsAccountImported);
+          await m.createTable(ledgerCategories);
+        }
+        if (from < 5) {
+          // Sending the phone's changes (Phase 5b).
+          await m.addColumn(ledgerOutbox, ledgerOutbox.revision);
+          await m.createTable(ledgerIdAliases);
+        }
       }
     },
     beforeOpen: (details) async {

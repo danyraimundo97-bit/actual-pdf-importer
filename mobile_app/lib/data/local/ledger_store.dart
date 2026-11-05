@@ -71,8 +71,20 @@ class LedgerStore {
     );
   }
 
-  Future<LedgerAccount?> account(String id) =>
-      (_db.select(_db.ledgerAccounts)..where((a) => a.id.equals(id))).getSingleOrNull();
+  Future<LedgerAccount?> account(String id) async {
+    final current = await currentId(id);
+    return (_db.select(_db.ledgerAccounts)..where((a) => a.id.equals(current))).getSingleOrNull();
+  }
+
+  /// [id] as it is now: a phone id becomes Actual's once its row is sent, and
+  /// a screen or an import's undo may still hold the old one.
+  Future<String> currentId(String id) async {
+    if (!_phoneId.hasMatch(id)) return id;
+    final alias = await (_db.select(_db.ledgerIdAliases)..where((a) => a.phoneId.equals(id))).getSingleOrNull();
+    return alias?.actualId ?? id;
+  }
+
+  static final _phoneId = RegExp(r'^(tx|acct|payee):');
 
   /// A new account; a non-zero [openingBalanceCents] becomes its opening
   /// balance transaction on [openedOn] (today by default).
@@ -111,7 +123,7 @@ class LedgerStore {
   Future<void> updateAccount(String id, {String? name, bool? offBudget, bool? closed, String? bankId}) {
     return _db.transaction(() async {
       final account = await _requireAccount(id);
-      await (_db.update(_db.ledgerAccounts)..where((a) => a.id.equals(id))).write(
+      await (_db.update(_db.ledgerAccounts)..where((a) => a.id.equals(account.id))).write(
         LedgerAccountsCompanion(
           name: name == null ? const Value.absent() : Value(name.trim()),
           offBudget: Value.absentIfNull(offBudget),
@@ -120,7 +132,7 @@ class LedgerStore {
           updatedAt: Value(_at),
         ),
       );
-      await _queue(account.scope, 'account', id);
+      await _queue(account.scope, 'account', account.id);
     });
   }
 
@@ -137,7 +149,7 @@ class LedgerStore {
 
   /// The account's opening balance (0 when it has none).
   Future<int> openingBalance(String accountId) async {
-    final row = await _openingBalanceRow(accountId);
+    final row = await _openingBalanceRow(await currentId(accountId));
     return row?.amountCents ?? 0;
   }
 
@@ -145,9 +157,9 @@ class LedgerStore {
   Future<void> setOpeningBalance(String accountId, int cents, {DateTime? on}) {
     return _db.transaction(() async {
       final account = await _requireAccount(accountId);
-      final existing = await _openingBalanceRow(accountId);
+      final existing = await _openingBalanceRow(account.id);
       if (existing == null) {
-        if (cents != 0) await _putOpeningBalance(account.scope, accountId, cents, on ?? _now());
+        if (cents != 0) await _putOpeningBalance(account.scope, account.id, cents, on ?? _now());
       } else if (cents == 0) {
         await _tombstone(existing);
       } else if (cents != existing.amountCents || on != null) {
@@ -228,8 +240,10 @@ class LedgerStore {
 
   // Transactions -------------------------------------------------------------
 
-  Future<LedgerTransaction?> transaction(String id) =>
-      (_db.select(_db.ledgerTransactions)..where((t) => t.id.equals(id))).getSingleOrNull();
+  Future<LedgerTransaction?> transaction(String id) async {
+    final current = await currentId(id);
+    return (_db.select(_db.ledgerTransactions)..where((t) => t.id.equals(current))).getSingleOrNull();
+  }
 
   /// Adds one transaction. Returns null when [LedgerDraft.importedId] is
   /// already in the account (a retried quick add).
@@ -244,6 +258,7 @@ class LedgerStore {
   Future<({int added, int skipped, List<String> ids})> addTransactions(String accountId, List<LedgerDraft> drafts) {
     return _db.transaction(() async {
       final account = await _requireAccount(accountId);
+      accountId = account.id;
       final wanted = {for (final d in drafts) ?d.importedId};
       final known = wanted.isEmpty
           ? <String>{}
@@ -294,7 +309,7 @@ class LedgerStore {
   /// the opening date stays what the user said.
   Future<({int added, int skipped, List<String> ids})> addStatement(String accountId, List<LedgerDraft> drafts) {
     return _db.transaction(() async {
-      final opening = await _openingBalanceRow(accountId);
+      final opening = await _openingBalanceRow(await currentId(accountId));
       final saved = await addTransactions(accountId, drafts);
       if (opening == null || saved.ids.isEmpty) return saved;
       final earlier = await (_db.select(
@@ -329,12 +344,10 @@ class LedgerStore {
     return _db.transaction(() async {
       final tx = await transaction(id);
       if (tx == null || tx.deleted) throw StateError('No transaction $id.');
-      if (tx.transferId != null || tx.isParent || tx.parentId != null) {
-        throw StateError('Transfers and split transactions are read-only on the phone.');
-      }
-      if (accountId != null) await _requireAccount(accountId);
+      if (_linked(tx)) throw StateError('Transfers and split transactions are read-only on the phone.');
+      if (accountId != null) accountId = (await _requireAccount(accountId!)).id;
       final payeeName = payee?.trim();
-      await (_db.update(_db.ledgerTransactions)..where((t) => t.id.equals(id))).write(
+      await (_db.update(_db.ledgerTransactions)..where((t) => t.id.equals(tx.id))).write(
         LedgerTransactionsCompanion(
           date: date == null ? const Value.absent() : Value(ledgerDate(date)),
           amountCents: Value.absentIfNull(amountCents),
@@ -347,7 +360,7 @@ class LedgerStore {
           updatedAt: Value(_at),
         ),
       );
-      await _queue(tx.scope, 'transaction', id);
+      await _queue(tx.scope, 'transaction', tx.id);
     });
   }
 
@@ -356,6 +369,7 @@ class LedgerStore {
     return _db.transaction(() async {
       final tx = await transaction(id);
       if (tx == null || tx.deleted) return;
+      if (_linked(tx)) throw StateError('Transfers and split transactions are read-only on the phone.');
       await _tombstone(tx);
     });
   }
@@ -367,13 +381,16 @@ class LedgerStore {
       var removed = 0;
       for (final id in ids) {
         final tx = await transaction(id);
-        if (tx == null || tx.deleted) continue;
+        if (tx == null || tx.deleted || _linked(tx)) continue;
         await _tombstone(tx);
         removed++;
       }
       return (removed: removed, skipped: ids.length - removed);
     });
   }
+
+  /// Actual keeps these rows in step with others.
+  static bool _linked(LedgerTransaction tx) => tx.transferId != null || tx.isParent || tx.parentId != null;
 
   Future<void> _tombstone(LedgerTransaction tx) async {
     await (_db.update(_db.ledgerTransactions)..where((t) => t.id.equals(tx.id))).write(
@@ -383,9 +400,10 @@ class LedgerStore {
   }
 
   /// An account's live transactions, newest first.
-  Future<List<LedgerTransaction>> transactions(String accountId, {int? limit, int offset = 0}) {
+  Future<List<LedgerTransaction>> transactions(String accountId, {int? limit, int offset = 0}) async {
+    final current = await currentId(accountId);
     final query = _db.select(_db.ledgerTransactions)
-      ..where((t) => t.accountId.equals(accountId) & t.deleted.equals(false) & t.parentId.isNull())
+      ..where((t) => t.accountId.equals(current) & t.deleted.equals(false) & t.parentId.isNull())
       ..orderBy([
         (t) => OrderingTerm.desc(t.date),
         (t) => OrderingTerm.desc(t.createdAt),
@@ -415,6 +433,11 @@ class LedgerStore {
   /// Every budget amount of a scope, all months (envelopes carry over).
   Future<List<LedgerBudget>> allBudgets(String scope) =>
       (_db.select(_db.ledgerBudgets)..where((b) => b.scope.equals(scope))).get();
+
+  /// Whether [scope] holds a pulled copy of an Actual budget.
+  Future<bool> hasPulled(String scope) async =>
+      (await (_db.select(_db.ledgerSyncState)..where((s) => s.scope.equals(scope))).getSingleOrNull())?.lastPulledAt !=
+      null;
 
   /// The budget style ('tracking' unless chosen otherwise). For the phone's
   /// scope it's the user's choice (Phase 7); for an Actual budget, Actual's.
@@ -506,15 +529,26 @@ class LedgerStore {
         .map((row) => row.read(count) ?? 0);
   }
 
-  /// One entry per row: a later change keeps the entry's place in the queue
-  /// and only updates what to do with it.
+  /// How many changes wait to go to Actual, and how many of those it refused.
+  Stream<({int waiting, int failed})> watchOutboxSummary(String scope) =>
+      (_db.select(_db.ledgerOutbox)..where((o) => o.scope.equals(scope))).watch().map(
+        (rows) => (waiting: rows.length, failed: rows.where((o) => o.lastError != null).length),
+      );
+
+  /// One entry per row: a later change keeps the entry's place in the queue,
+  /// updates what to do with it, and marks it as changed since any send.
   Future<void> _queue(String scope, String kind, String rowId, {String op = 'put'}) async {
     await _db
         .into(_db.ledgerOutbox)
         .insert(
           LedgerOutboxCompanion.insert(scope: scope, kind: kind, rowId: rowId, op: op, createdAt: _at),
           onConflict: DoUpdate(
-            (_) => LedgerOutboxCompanion(op: Value(op), scope: Value(scope)),
+            (old) => LedgerOutboxCompanion.custom(
+              op: Variable(op),
+              scope: Variable(scope),
+              revision: old.revision + const Constant(1),
+              lastError: const Constant<String>(null),
+            ),
             target: [_db.ledgerOutbox.kind, _db.ledgerOutbox.rowId],
           ),
         );

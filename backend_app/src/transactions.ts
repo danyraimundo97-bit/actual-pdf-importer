@@ -1,4 +1,4 @@
-import type { BudgetRef, BudgetSession } from './budget-session';
+import type { ActualPort, BudgetRef, BudgetSession } from './budget-session';
 import { AccountNotFoundError, ImporterError, InvalidFieldError } from './errors';
 
 /**
@@ -77,39 +77,46 @@ export async function addManualTransaction(
   budget: BudgetRef,
   input: ManualTransaction,
 ): Promise<{ id: string | null; created: boolean }> {
-  const importedId = `${MANUAL_ID_PREFIX}${input.clientId}`;
   return session.withBudget(
     budget,
-    async (actual) => {
-      const account = (await actual.getAccounts()).find((a) => a.id === input.accountId);
-      if (!account || account.closed) throw new AccountNotFoundError(input.accountId);
-
-      const findOurs = async () =>
-        (await actual.getTransactions(input.accountId, input.date, input.date)).find(
-          (t) => t.imported_id === importedId,
-        );
-
-      const existing = await findOurs();
-      if (existing) return { id: existing.id, created: false };
-
-      await actual.addTransactions(
-        input.accountId,
-        [
-          {
-            date: input.date,
-            amount: input.amountCents,
-            payee_name: input.payeeName,
-            category: input.categoryId,
-            notes: input.notes,
-            imported_id: importedId,
-          },
-        ],
-        { runTransfers: false, learnCategories: false },
-      );
-      return { id: (await findOurs())?.id ?? null, created: true };
-    },
+    (actual) => addManualInTurn(actual, { ...input, importedId: `${MANUAL_ID_PREFIX}${input.clientId}` }),
     { write: true },
   );
+}
+
+/** One manual row, inside a budget turn; also the ledger push's way in. */
+export async function addManualInTurn(
+  actual: ActualPort,
+  input: Omit<ManualTransaction, 'clientId'> & { importedId: string; cleared?: boolean; startingBalance?: boolean },
+): Promise<{ id: string | null; created: boolean }> {
+  const account = (await actual.getAccounts()).find((a) => a.id === input.accountId);
+  if (!account || account.closed) throw new AccountNotFoundError(input.accountId);
+
+  const findOurs = async () =>
+    (await actual.getTransactions(input.accountId, input.date, input.date)).find(
+      (t) => t.imported_id === input.importedId,
+    );
+
+  const existing = await findOurs();
+  if (existing) return { id: existing.id, created: false };
+
+  await actual.addTransactions(
+    input.accountId,
+    [
+      {
+        date: input.date,
+        amount: input.amountCents,
+        payee_name: input.payeeName,
+        category: input.categoryId,
+        notes: input.notes,
+        imported_id: input.importedId,
+        cleared: input.cleared,
+        ...(input.startingBalance ? { starting_balance_flag: true } : {}),
+      },
+    ],
+    { runTransfers: false, learnCategories: false },
+  );
+  return { id: (await findOurs())?.id ?? null, created: true };
 }
 
 // --- GET /quick-add/options ------------------------------------------------

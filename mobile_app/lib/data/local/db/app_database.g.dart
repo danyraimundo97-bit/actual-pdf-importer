@@ -4252,6 +4252,18 @@ class $LedgerOutboxTable extends LedgerOutbox
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _lastErrorMeta = const VerificationMeta(
     'lastError',
   );
@@ -4272,6 +4284,7 @@ class $LedgerOutboxTable extends LedgerOutbox
     op,
     createdAt,
     attempts,
+    revision,
     lastError,
   ];
   @override
@@ -4335,6 +4348,12 @@ class $LedgerOutboxTable extends LedgerOutbox
         attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
       );
     }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    }
     if (data.containsKey('last_error')) {
       context.handle(
         _lastErrorMeta,
@@ -4382,6 +4401,10 @@ class $LedgerOutboxTable extends LedgerOutbox
         DriftSqlType.int,
         data['${effectivePrefix}attempts'],
       )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
       lastError: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}last_error'],
@@ -4411,6 +4434,10 @@ class LedgerOutboxData extends DataClass
   final int createdAt;
   final int attempts;
 
+  /// Bumped by every later change to the row (schema 5). A push only clears
+  /// the entry if this is still the revision it sent.
+  final int revision;
+
   /// An error code from the last attempt, never a message carrying data.
   final String? lastError;
   const LedgerOutboxData({
@@ -4421,6 +4448,7 @@ class LedgerOutboxData extends DataClass
     required this.op,
     required this.createdAt,
     required this.attempts,
+    required this.revision,
     this.lastError,
   });
   @override
@@ -4433,6 +4461,7 @@ class LedgerOutboxData extends DataClass
     map['op'] = Variable<String>(op);
     map['created_at'] = Variable<int>(createdAt);
     map['attempts'] = Variable<int>(attempts);
+    map['revision'] = Variable<int>(revision);
     if (!nullToAbsent || lastError != null) {
       map['last_error'] = Variable<String>(lastError);
     }
@@ -4448,6 +4477,7 @@ class LedgerOutboxData extends DataClass
       op: Value(op),
       createdAt: Value(createdAt),
       attempts: Value(attempts),
+      revision: Value(revision),
       lastError: lastError == null && nullToAbsent
           ? const Value.absent()
           : Value(lastError),
@@ -4467,6 +4497,7 @@ class LedgerOutboxData extends DataClass
       op: serializer.fromJson<String>(json['op']),
       createdAt: serializer.fromJson<int>(json['createdAt']),
       attempts: serializer.fromJson<int>(json['attempts']),
+      revision: serializer.fromJson<int>(json['revision']),
       lastError: serializer.fromJson<String?>(json['lastError']),
     );
   }
@@ -4481,6 +4512,7 @@ class LedgerOutboxData extends DataClass
       'op': serializer.toJson<String>(op),
       'createdAt': serializer.toJson<int>(createdAt),
       'attempts': serializer.toJson<int>(attempts),
+      'revision': serializer.toJson<int>(revision),
       'lastError': serializer.toJson<String?>(lastError),
     };
   }
@@ -4493,6 +4525,7 @@ class LedgerOutboxData extends DataClass
     String? op,
     int? createdAt,
     int? attempts,
+    int? revision,
     Value<String?> lastError = const Value.absent(),
   }) => LedgerOutboxData(
     seq: seq ?? this.seq,
@@ -4502,6 +4535,7 @@ class LedgerOutboxData extends DataClass
     op: op ?? this.op,
     createdAt: createdAt ?? this.createdAt,
     attempts: attempts ?? this.attempts,
+    revision: revision ?? this.revision,
     lastError: lastError.present ? lastError.value : this.lastError,
   );
   LedgerOutboxData copyWithCompanion(LedgerOutboxCompanion data) {
@@ -4513,6 +4547,7 @@ class LedgerOutboxData extends DataClass
       op: data.op.present ? data.op.value : this.op,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      revision: data.revision.present ? data.revision.value : this.revision,
       lastError: data.lastError.present ? data.lastError.value : this.lastError,
     );
   }
@@ -4527,14 +4562,24 @@ class LedgerOutboxData extends DataClass
           ..write('op: $op, ')
           ..write('createdAt: $createdAt, ')
           ..write('attempts: $attempts, ')
+          ..write('revision: $revision, ')
           ..write('lastError: $lastError')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(seq, scope, kind, rowId, op, createdAt, attempts, lastError);
+  int get hashCode => Object.hash(
+    seq,
+    scope,
+    kind,
+    rowId,
+    op,
+    createdAt,
+    attempts,
+    revision,
+    lastError,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -4546,6 +4591,7 @@ class LedgerOutboxData extends DataClass
           other.op == this.op &&
           other.createdAt == this.createdAt &&
           other.attempts == this.attempts &&
+          other.revision == this.revision &&
           other.lastError == this.lastError);
 }
 
@@ -4557,6 +4603,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
   final Value<String> op;
   final Value<int> createdAt;
   final Value<int> attempts;
+  final Value<int> revision;
   final Value<String?> lastError;
   const LedgerOutboxCompanion({
     this.seq = const Value.absent(),
@@ -4566,6 +4613,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
     this.op = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.attempts = const Value.absent(),
+    this.revision = const Value.absent(),
     this.lastError = const Value.absent(),
   });
   LedgerOutboxCompanion.insert({
@@ -4576,6 +4624,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
     required String op,
     required int createdAt,
     this.attempts = const Value.absent(),
+    this.revision = const Value.absent(),
     this.lastError = const Value.absent(),
   }) : scope = Value(scope),
        kind = Value(kind),
@@ -4590,6 +4639,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
     Expression<String>? op,
     Expression<int>? createdAt,
     Expression<int>? attempts,
+    Expression<int>? revision,
     Expression<String>? lastError,
   }) {
     return RawValuesInsertable({
@@ -4600,6 +4650,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
       if (op != null) 'op': op,
       if (createdAt != null) 'created_at': createdAt,
       if (attempts != null) 'attempts': attempts,
+      if (revision != null) 'revision': revision,
       if (lastError != null) 'last_error': lastError,
     });
   }
@@ -4612,6 +4663,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
     Value<String>? op,
     Value<int>? createdAt,
     Value<int>? attempts,
+    Value<int>? revision,
     Value<String?>? lastError,
   }) {
     return LedgerOutboxCompanion(
@@ -4622,6 +4674,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
       op: op ?? this.op,
       createdAt: createdAt ?? this.createdAt,
       attempts: attempts ?? this.attempts,
+      revision: revision ?? this.revision,
       lastError: lastError ?? this.lastError,
     );
   }
@@ -4650,6 +4703,9 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
     if (attempts.present) {
       map['attempts'] = Variable<int>(attempts.value);
     }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
     if (lastError.present) {
       map['last_error'] = Variable<String>(lastError.value);
     }
@@ -4666,6 +4722,7 @@ class LedgerOutboxCompanion extends UpdateCompanion<LedgerOutboxData> {
           ..write('op: $op, ')
           ..write('createdAt: $createdAt, ')
           ..write('attempts: $attempts, ')
+          ..write('revision: $revision, ')
           ..write('lastError: $lastError')
           ..write(')'))
         .toString();
@@ -5677,6 +5734,224 @@ class LedgerCategoriesCompanion extends UpdateCompanion<LedgerCategory> {
   }
 }
 
+class $LedgerIdAliasesTable extends LedgerIdAliases
+    with TableInfo<$LedgerIdAliasesTable, LedgerIdAliase> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LedgerIdAliasesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _phoneIdMeta = const VerificationMeta(
+    'phoneId',
+  );
+  @override
+  late final GeneratedColumn<String> phoneId = GeneratedColumn<String>(
+    'phone_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _actualIdMeta = const VerificationMeta(
+    'actualId',
+  );
+  @override
+  late final GeneratedColumn<String> actualId = GeneratedColumn<String>(
+    'actual_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [phoneId, actualId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'ledger_id_aliases';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LedgerIdAliase> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('phone_id')) {
+      context.handle(
+        _phoneIdMeta,
+        phoneId.isAcceptableOrUnknown(data['phone_id']!, _phoneIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_phoneIdMeta);
+    }
+    if (data.containsKey('actual_id')) {
+      context.handle(
+        _actualIdMeta,
+        actualId.isAcceptableOrUnknown(data['actual_id']!, _actualIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_actualIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {phoneId};
+  @override
+  LedgerIdAliase map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LedgerIdAliase(
+      phoneId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}phone_id'],
+      )!,
+      actualId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}actual_id'],
+      )!,
+    );
+  }
+
+  @override
+  $LedgerIdAliasesTable createAlias(String alias) {
+    return $LedgerIdAliasesTable(attachedDatabase, alias);
+  }
+}
+
+class LedgerIdAliase extends DataClass implements Insertable<LedgerIdAliase> {
+  final String phoneId;
+  final String actualId;
+  const LedgerIdAliase({required this.phoneId, required this.actualId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['phone_id'] = Variable<String>(phoneId);
+    map['actual_id'] = Variable<String>(actualId);
+    return map;
+  }
+
+  LedgerIdAliasesCompanion toCompanion(bool nullToAbsent) {
+    return LedgerIdAliasesCompanion(
+      phoneId: Value(phoneId),
+      actualId: Value(actualId),
+    );
+  }
+
+  factory LedgerIdAliase.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LedgerIdAliase(
+      phoneId: serializer.fromJson<String>(json['phoneId']),
+      actualId: serializer.fromJson<String>(json['actualId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'phoneId': serializer.toJson<String>(phoneId),
+      'actualId': serializer.toJson<String>(actualId),
+    };
+  }
+
+  LedgerIdAliase copyWith({String? phoneId, String? actualId}) =>
+      LedgerIdAliase(
+        phoneId: phoneId ?? this.phoneId,
+        actualId: actualId ?? this.actualId,
+      );
+  LedgerIdAliase copyWithCompanion(LedgerIdAliasesCompanion data) {
+    return LedgerIdAliase(
+      phoneId: data.phoneId.present ? data.phoneId.value : this.phoneId,
+      actualId: data.actualId.present ? data.actualId.value : this.actualId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LedgerIdAliase(')
+          ..write('phoneId: $phoneId, ')
+          ..write('actualId: $actualId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(phoneId, actualId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LedgerIdAliase &&
+          other.phoneId == this.phoneId &&
+          other.actualId == this.actualId);
+}
+
+class LedgerIdAliasesCompanion extends UpdateCompanion<LedgerIdAliase> {
+  final Value<String> phoneId;
+  final Value<String> actualId;
+  final Value<int> rowid;
+  const LedgerIdAliasesCompanion({
+    this.phoneId = const Value.absent(),
+    this.actualId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LedgerIdAliasesCompanion.insert({
+    required String phoneId,
+    required String actualId,
+    this.rowid = const Value.absent(),
+  }) : phoneId = Value(phoneId),
+       actualId = Value(actualId);
+  static Insertable<LedgerIdAliase> custom({
+    Expression<String>? phoneId,
+    Expression<String>? actualId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (phoneId != null) 'phone_id': phoneId,
+      if (actualId != null) 'actual_id': actualId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LedgerIdAliasesCompanion copyWith({
+    Value<String>? phoneId,
+    Value<String>? actualId,
+    Value<int>? rowid,
+  }) {
+    return LedgerIdAliasesCompanion(
+      phoneId: phoneId ?? this.phoneId,
+      actualId: actualId ?? this.actualId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (phoneId.present) {
+      map['phone_id'] = Variable<String>(phoneId.value);
+    }
+    if (actualId.present) {
+      map['actual_id'] = Variable<String>(actualId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LedgerIdAliasesCompanion(')
+          ..write('phoneId: $phoneId, ')
+          ..write('actualId: $actualId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -5696,6 +5971,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $LedgerCategoriesTable ledgerCategories = $LedgerCategoriesTable(
+    this,
+  );
+  late final $LedgerIdAliasesTable ledgerIdAliases = $LedgerIdAliasesTable(
     this,
   );
   late final Index ledgerTransactionsAccountDate = Index(
@@ -5726,6 +6004,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     ledgerOutbox,
     ledgerSyncState,
     ledgerCategories,
+    ledgerIdAliases,
     ledgerTransactionsAccountDate,
     ledgerTransactionsScopeDate,
     ledgerTransactionsAccountImported,
@@ -8743,6 +9022,7 @@ typedef $$LedgerOutboxTableCreateCompanionBuilder =
       required String op,
       required int createdAt,
       Value<int> attempts,
+      Value<int> revision,
       Value<String?> lastError,
     });
 typedef $$LedgerOutboxTableUpdateCompanionBuilder =
@@ -8754,6 +9034,7 @@ typedef $$LedgerOutboxTableUpdateCompanionBuilder =
       Value<String> op,
       Value<int> createdAt,
       Value<int> attempts,
+      Value<int> revision,
       Value<String?> lastError,
     });
 
@@ -8798,6 +9079,11 @@ class $$LedgerOutboxTableFilterComposer
 
   ColumnFilters<int> get attempts => $composableBuilder(
     column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8851,6 +9137,11 @@ class $$LedgerOutboxTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get lastError => $composableBuilder(
     column: $table.lastError,
     builder: (column) => ColumnOrderings(column),
@@ -8886,6 +9177,9 @@ class $$LedgerOutboxTableAnnotationComposer
 
   GeneratedColumn<int> get attempts =>
       $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
 
   GeneratedColumn<String> get lastError =>
       $composableBuilder(column: $table.lastError, builder: (column) => column);
@@ -8929,6 +9223,7 @@ class $$LedgerOutboxTableTableManager
                 Value<String> op = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
+                Value<int> revision = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
               }) => LedgerOutboxCompanion(
                 seq: seq,
@@ -8938,6 +9233,7 @@ class $$LedgerOutboxTableTableManager
                 op: op,
                 createdAt: createdAt,
                 attempts: attempts,
+                revision: revision,
                 lastError: lastError,
               ),
           createCompanionCallback:
@@ -8949,6 +9245,7 @@ class $$LedgerOutboxTableTableManager
                 required String op,
                 required int createdAt,
                 Value<int> attempts = const Value.absent(),
+                Value<int> revision = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
               }) => LedgerOutboxCompanion.insert(
                 seq: seq,
@@ -8958,6 +9255,7 @@ class $$LedgerOutboxTableTableManager
                 op: op,
                 createdAt: createdAt,
                 attempts: attempts,
+                revision: revision,
                 lastError: lastError,
               ),
           withReferenceMapper: (p0) => p0
@@ -9537,6 +9835,164 @@ typedef $$LedgerCategoriesTableProcessedTableManager =
       LedgerCategory,
       PrefetchHooks Function()
     >;
+typedef $$LedgerIdAliasesTableCreateCompanionBuilder =
+    LedgerIdAliasesCompanion Function({
+      required String phoneId,
+      required String actualId,
+      Value<int> rowid,
+    });
+typedef $$LedgerIdAliasesTableUpdateCompanionBuilder =
+    LedgerIdAliasesCompanion Function({
+      Value<String> phoneId,
+      Value<String> actualId,
+      Value<int> rowid,
+    });
+
+class $$LedgerIdAliasesTableFilterComposer
+    extends Composer<_$AppDatabase, $LedgerIdAliasesTable> {
+  $$LedgerIdAliasesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get phoneId => $composableBuilder(
+    column: $table.phoneId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get actualId => $composableBuilder(
+    column: $table.actualId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LedgerIdAliasesTableOrderingComposer
+    extends Composer<_$AppDatabase, $LedgerIdAliasesTable> {
+  $$LedgerIdAliasesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get phoneId => $composableBuilder(
+    column: $table.phoneId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get actualId => $composableBuilder(
+    column: $table.actualId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LedgerIdAliasesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LedgerIdAliasesTable> {
+  $$LedgerIdAliasesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get phoneId =>
+      $composableBuilder(column: $table.phoneId, builder: (column) => column);
+
+  GeneratedColumn<String> get actualId =>
+      $composableBuilder(column: $table.actualId, builder: (column) => column);
+}
+
+class $$LedgerIdAliasesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LedgerIdAliasesTable,
+          LedgerIdAliase,
+          $$LedgerIdAliasesTableFilterComposer,
+          $$LedgerIdAliasesTableOrderingComposer,
+          $$LedgerIdAliasesTableAnnotationComposer,
+          $$LedgerIdAliasesTableCreateCompanionBuilder,
+          $$LedgerIdAliasesTableUpdateCompanionBuilder,
+          (
+            LedgerIdAliase,
+            BaseReferences<
+              _$AppDatabase,
+              $LedgerIdAliasesTable,
+              LedgerIdAliase
+            >,
+          ),
+          LedgerIdAliase,
+          PrefetchHooks Function()
+        > {
+  $$LedgerIdAliasesTableTableManager(
+    _$AppDatabase db,
+    $LedgerIdAliasesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LedgerIdAliasesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LedgerIdAliasesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LedgerIdAliasesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> phoneId = const Value.absent(),
+                Value<String> actualId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LedgerIdAliasesCompanion(
+                phoneId: phoneId,
+                actualId: actualId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String phoneId,
+                required String actualId,
+                Value<int> rowid = const Value.absent(),
+              }) => LedgerIdAliasesCompanion.insert(
+                phoneId: phoneId,
+                actualId: actualId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LedgerIdAliasesTable, LedgerIdAliase>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $LedgerIdAliasesTable,
+                    LedgerIdAliase
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LedgerIdAliasesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LedgerIdAliasesTable,
+      LedgerIdAliase,
+      $$LedgerIdAliasesTableFilterComposer,
+      $$LedgerIdAliasesTableOrderingComposer,
+      $$LedgerIdAliasesTableAnnotationComposer,
+      $$LedgerIdAliasesTableCreateCompanionBuilder,
+      $$LedgerIdAliasesTableUpdateCompanionBuilder,
+      (
+        LedgerIdAliase,
+        BaseReferences<_$AppDatabase, $LedgerIdAliasesTable, LedgerIdAliase>,
+      ),
+      LedgerIdAliase,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -9563,4 +10019,6 @@ class $AppDatabaseManager {
       $$LedgerSyncStateTableTableManager(_db, _db.ledgerSyncState);
   $$LedgerCategoriesTableTableManager get ledgerCategories =>
       $$LedgerCategoriesTableTableManager(_db, _db.ledgerCategories);
+  $$LedgerIdAliasesTableTableManager get ledgerIdAliases =>
+      $$LedgerIdAliasesTableTableManager(_db, _db.ledgerIdAliases);
 }

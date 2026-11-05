@@ -134,6 +134,10 @@ class LedgerOutbox extends Table {
   IntColumn get createdAt => integer()();
   IntColumn get attempts => integer().withDefault(const Constant(0))();
 
+  /// Bumped by every later change to the row (schema 5). A push only clears
+  /// the entry if this is still the revision it sent.
+  IntColumn get revision => integer().withDefault(const Constant(0))();
+
   /// An error code from the last attempt, never a message carrying data.
   TextColumn get lastError => text().nullable()();
 
@@ -141,6 +145,16 @@ class LedgerOutbox extends Table {
   List<Set<Column>> get uniqueKeys => [
     {kind, rowId},
   ];
+}
+
+/// What a phone id became once its row reached Actual (schema 5), so an open
+/// screen, an import's undo or a remembered account still finds the row.
+class LedgerIdAliases extends Table {
+  TextColumn get phoneId => text()();
+  TextColumn get actualId => text()();
+
+  @override
+  Set<Column> get primaryKey => {phoneId};
 }
 
 class LedgerSyncState extends Table {

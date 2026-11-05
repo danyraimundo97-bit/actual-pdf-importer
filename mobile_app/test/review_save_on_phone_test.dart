@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_app/data/local/db/app_database.dart';
 import 'package:mobile_app/data/local/import_history_store.dart';
 import 'package:mobile_app/data/local/ledger_store.dart';
+import 'package:mobile_app/data/models/actual_account.dart';
 import 'package:mobile_app/data/models/import_result.dart';
 import 'package:mobile_app/data/models/parse_result.dart';
 import 'package:mobile_app/data/models/parsed_transaction.dart';
@@ -110,7 +112,12 @@ void main() {
     }
 
     /// Review pushed over a home page that keeps what it popped with.
-    Future<List<ImportResult?>> pumpReview(WidgetTester tester, List<ParsedTransaction> lines) async {
+    Future<List<ImportResult?>> pumpReview(
+      WidgetTester tester,
+      List<ParsedTransaction> lines, {
+      ActualAccount? actualAccount,
+      String? budgetSyncId,
+    }) async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
       await tester.binding.setSurfaceSize(const Size(800, 1600));
@@ -127,7 +134,9 @@ void main() {
                     '/review',
                     extra: ReviewScreenArgs(
                       parseResult: ParseResult(bankId: 'moey', transactions: lines),
-                      saveOnPhone: true,
+                      account: actualAccount,
+                      budgetSyncId: budgetSyncId,
+                      saveOnPhone: actualAccount == null,
                     ),
                   ),
                 ),
@@ -180,6 +189,50 @@ void main() {
       await tester.tap(find.text('Done'));
       await settle(tester);
       expect((popped.single!.added, popped.single!.updated), (0, 2));
+      await finish(tester);
+    });
+
+    testWidgets('importing into Actual writes to its copy first, with the lines; undoing goes through the ledger', (
+      tester,
+    ) async {
+      const budget = 'budget-1';
+      final store = LedgerStore(db);
+      await tester.runAsync(() async {
+        await db
+            .into(db.ledgerAccounts)
+            .insert(LedgerAccountsCompanion.insert(id: 'chk', scope: budget, name: 'Checking', sort: 0, updatedAt: 0));
+        await db.into(db.ledgerSyncState).insert(LedgerSyncStateCompanion.insert(scope: budget, lastPulledAt: const Value(1)));
+      });
+      final line = ParsedTransaction(
+        date: DateTime(2026, 10, 3),
+        payee: 'SHOP',
+        amountCents: -1230,
+        rawLine: 'line from the statement',
+        importedId: 'pdfimport-a',
+      );
+
+      final popped = await pumpReview(
+        tester,
+        [line],
+        actualAccount: const ActualAccount(id: 'chk', name: 'Checking', offbudget: false, closed: false),
+        budgetSyncId: budget,
+      );
+      await tester.tap(find.text('Import 1 transaction'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+      await settle(tester);
+      expect(find.text('Import complete'), findsOneWidget);
+      await tester.tap(find.text('Done'));
+      await settle(tester);
+
+      final result = popped.single!;
+      expect((result.added, result.onPhone, result.inLedger), (1, false, true));
+      final row = (await tester.runAsync(() => store.transaction(result.addedIds.single)))!;
+      expect((row.scope, row.accountId, row.notes, row.importedId), (budget, 'chk', 'line from the statement', 'pdfimport-a'));
+      expect((await tester.runAsync(() => store.watchOutboxSummary(budget).first))!.waiting, 2);
+
+      final removed = (await tester.runAsync(() => store.deleteTransactions(result.addedIds)))!;
+      expect(removed.removed, 1);
       await finish(tester);
     });
 

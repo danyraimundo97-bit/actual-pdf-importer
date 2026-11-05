@@ -8,6 +8,7 @@ import '../../../core/format/banks.dart';
 import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/ledger_sync_controller.dart';
 import '../../../data/local/db/app_database.dart';
 import '../../../data/local/db/local_category_store.dart';
 import '../../../data/local/ledger_store.dart';
@@ -309,9 +310,28 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     setState(() => _importing = true);
     _log.info('Import confirmed', {'accountId': account.id, 'transactions': included.length});
     try {
-      final result = await ref
-          .read(importerApiProvider)
-          .confirmImport(accountId: account.id, transactions: included, budgetSyncId: widget.args.budgetSyncId);
+      // Into the phone's copy of the budget first; the sync takes it to Actual.
+      final store = ref.read(ledgerStoreProvider);
+      final budgetSyncId = widget.args.budgetSyncId;
+      if (budgetSyncId != null) await ref.read(ledgerSyncProvider.notifier).ensurePulled(budgetSyncId);
+      final saved = await store.addTransactions(account.id, statementDrafts(included, keepLines: true));
+      var categorized = 0;
+      for (final id in saved.ids) {
+        if ((await store.transaction(id))?.categoryId != null) categorized++;
+      }
+      _log.info('Statement saved for Actual', {
+        'accountId': account.id,
+        'added': saved.added,
+        'skipped': saved.skipped,
+      });
+      ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
+      final result = ImportResult(
+        added: saved.added,
+        updated: saved.skipped,
+        categorized: categorized,
+        addedIds: saved.ids,
+        inLedger: true,
+      );
       if (!mounted) return;
       await showModalBottomSheet<void>(
         context: context,
@@ -328,6 +348,13 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (e, stack) {
+      _log.error('Saving the statement for Actual failed', e, stack, {'accountId': account.id});
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not save the transactions on this phone.')));
       }
     } finally {
       if (mounted) setState(() => _importing = false);

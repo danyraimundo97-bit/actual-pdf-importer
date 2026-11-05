@@ -1,16 +1,20 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mobile_app/core/errors/api_exception.dart';
-import 'package:mobile_app/data/api/importer_api.dart';
-import 'package:mobile_app/data/local/secret_store.dart';
+import 'package:mobile_app/data/local/db/app_database.dart';
+import 'package:mobile_app/data/local/db/local_category_store.dart';
+import 'package:mobile_app/data/local/ledger_store.dart';
+import 'package:mobile_app/data/local/ledger_sync.dart';
 import 'package:mobile_app/data/models/actual_account.dart';
 import 'package:mobile_app/data/models/actual_category.dart';
 import 'package:mobile_app/data/models/budget_month.dart';
 import 'package:mobile_app/data/models/quick_add.dart';
 import 'package:mobile_app/data/providers.dart';
+import 'package:mobile_app/features/budget/screens/budget_screen.dart';
 import 'package:mobile_app/features/quick_add/quick_add_controller.dart';
 import 'package:mobile_app/features/quick_add/screens/quick_add_screen.dart';
 
@@ -20,78 +24,94 @@ const _options = QuickAddOptions(
     ActualAccount(id: 'cash', name: 'Cash', offbudget: false, closed: false),
   ],
   categoryGroups: [
-    ActualCategoryGroup(id: 'food', name: 'Food', categories: [ActualCategory(id: 'groc', name: 'Groceries')]),
-    ActualCategoryGroup(id: 'inc', name: 'Income', categories: [ActualCategory(id: 'sal', name: 'Salary')]),
+    ActualCategoryGroup(
+      id: 'food',
+      name: 'Food',
+      categories: [ActualCategory(id: 'groc', name: 'Groceries')],
+    ),
+    ActualCategoryGroup(
+      id: 'inc',
+      name: 'Income',
+      categories: [ActualCategory(id: 'sal', name: 'Salary')],
+    ),
   ],
   incomeGroupIds: {'inc'},
-  recentPayees: [RecentPayee(name: 'Lidl', lastCategoryId: 'groc'), RecentPayee(name: 'Café')],
+  recentPayees: [
+    RecentPayee(name: 'Lidl', lastCategoryId: 'groc'),
+    RecentPayee(name: 'Café'),
+  ],
 );
 
-class _FakeApi implements ImporterApi {
-  final calls = <Map<String, Object?>>[];
+const _budget = 'casa';
 
-  /// Fail the next N saves (a dropped connection).
-  int failures = 0;
-
-  @override
-  Future<QuickAddOptions> getQuickAddOptions({String? budgetSyncId}) async => _options;
-
-  @override
-  Future<({String? id, bool created})> addTransaction({
-    required String accountId,
-    required DateTime date,
-    required int amountCents,
-    required String clientId,
-    String? payeeName,
-    String? categoryId,
-    String? notes,
-    String? budgetSyncId,
-    String? budgetPassword,
-  }) async {
-    calls.add({
-      'accountId': accountId,
-      'amountCents': amountCents,
-      'clientId': clientId,
-      'payeeName': payeeName,
-      'categoryId': categoryId,
-    });
-    if (failures > 0) {
-      failures--;
-      throw const ApiException(message: 'Could not reach the importer backend.');
-    }
-    return (id: 'tx-1', created: calls.length == 1);
-  }
-
-  @override
-  Future<BudgetMonth> getBudgetMonth({String? budgetSyncId, String? month}) => throw UnimplementedError();
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class _FakeSecrets implements SecretStore {
-  @override
-  Future<String?> budgetPassword(String syncId) async => null;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-Future<(ProviderContainer, _FakeApi, SharedPreferences)> _container({Map<String, Object> prefs = const {}}) async {
-  SharedPreferences.setMockInitialValues({'budget_sync_id': 'casa', ...prefs});
+/// A phone with a pulled copy of the budget, or (with [connected] false)
+/// the phone's own budget and no backend at all.
+Future<(ProviderContainer, AppDatabase, SharedPreferences)> _container({
+  Map<String, Object> prefs = const {},
+  bool connected = true,
+}) async {
+  SharedPreferences.setMockInitialValues({if (connected) 'budget_sync_id': _budget, ...prefs});
   final sp = await SharedPreferences.getInstance();
-  final api = _FakeApi();
-  final container = ProviderContainer(
-    overrides: [
-      sharedPreferencesProvider.overrideWithValue(sp),
-      importerApiProvider.overrideWithValue(api),
-      secretStoreProvider.overrideWithValue(_FakeSecrets()),
-    ],
-  );
+  final db = AppDatabase(NativeDatabase.memory());
+  addTearDown(db.close);
+  final container = ProviderContainer(overrides: _overrides(sp, db, connected: connected));
   addTearDown(container.dispose);
   // Keep the auto-dispose controller alive for the whole test.
   container.listen(quickAddControllerProvider, (_, _) {});
-  return (container, api, sp);
+  return (container, db, sp);
+}
+
+List<Override> _overrides(SharedPreferences sp, AppDatabase db, {required bool connected}) => [
+  sharedPreferencesProvider.overrideWithValue(sp),
+  appDatabaseProvider.overrideWithValue(db),
+  linkStateProvider.overrideWith((ref) async => connected ? LinkState.ready : LinkState.noBackend),
+];
+
+Future<void> _seedCopy(AppDatabase db) async {
+  await LedgerSync(db, (_, _, _) async {
+    return {
+      'epoch': 'e1',
+      'lastId': 1,
+      'full': true,
+      'budgetType': 'envelope',
+      'accounts': [
+        {'id': 'chk', 'name': 'Checking', 'offbudget': false, 'closed': false},
+      ],
+      'categoryGroups': [
+        {
+          'id': 'food',
+          'name': 'Food',
+          'isIncome': false,
+          'hidden': false,
+          'categories': [
+            {'id': 'groc', 'name': 'Groceries', 'hidden': false},
+          ],
+        },
+      ],
+      'payees': [
+        {'id': 'p1', 'name': 'Lidl', 'transferAccountId': null},
+      ],
+      'transactions': [
+        {
+          'id': 't1',
+          'accountId': 'chk',
+          'date': '2026-10-01',
+          'amountCents': -1000,
+          'payeeId': 'p1',
+          'categoryId': 'groc',
+          'notes': null,
+          'cleared': false,
+          'importedId': null,
+          'startingBalance': false,
+          'transferId': null,
+          'parentId': null,
+          'isParent': false,
+          'deleted': false,
+        },
+      ],
+      'budgets': [],
+    };
+  }).pull(_budget);
 }
 
 void main() {
@@ -152,60 +172,154 @@ void main() {
     expect(c2.read(quickAddControllerProvider).accountId, 'chk');
   });
 
-  test('a failed save keeps the form, and the retry reuses the same clientId', () async {
-    final (c, api, sp) = await _container();
-    final controller = c.read(quickAddControllerProvider.notifier)..applyOptions(_options);
+  test('saving twice from one form adds it once', () async {
+    final (c, db, sp) = await _container();
+    await _seedCopy(db);
+    final store = LedgerStore(db);
+    final options = await c.read(quickAddOptionsProvider.future);
+    final controller = c.read(quickAddControllerProvider.notifier)..applyOptions(options);
     controller.setAmount('4,50');
-    controller.setPayee('Café', options: _options);
-    api.failures = 1;
-
-    expect(await controller.save(), isFalse);
-    expect(c.read(quickAddControllerProvider).error, isNotNull);
-    expect(c.read(quickAddControllerProvider).amountText, '4,50');
+    controller.setPayee('Café', options: options);
 
     expect(await controller.save(), isTrue);
-    expect(api.calls, hasLength(2));
-    expect(api.calls[0]['clientId'], api.calls[1]['clientId']);
-    expect(api.calls[1]['amountCents'], -450);
-    expect(api.calls[1]['payeeName'], 'Café');
+    expect(await controller.save(), isTrue);
+
+    final added = (await store.transactions('chk')).where((t) => t.amountCents == -450).toList();
+    expect(added, hasLength(1));
+    expect(added.single.importedId, 'app-${c.read(quickAddControllerProvider).clientId}');
+    expect(await store.watchOutboxSummary(_budget).first, (waiting: 2, failed: 0), reason: 'waits for the sync');
     expect(sp.getString('last_account_id'), 'chk');
   });
 
-  testWidgets('type an amount, pick a known payee, save', (tester) async {
-    SharedPreferences.setMockInitialValues({'budget_sync_id': 'casa', 'backend_url': 'http://b'});
+  test('a save that fails keeps the form and says so', () async {
+    final (c, db, _) = await _container();
+    await _seedCopy(db);
+    final controller = c.read(quickAddControllerProvider.notifier);
+    controller.setAmount('4,50');
+    controller.setAccount('no-such-account');
+    expect(await controller.save(), isFalse);
+    expect(c.read(quickAddControllerProvider).error, isNotNull);
+    expect(c.read(quickAddControllerProvider).amountText, '4,50');
+  });
+
+  test("without Actual it offers the phone's accounts and categories, and saves there", () async {
+    final (c, db, _) = await _container(connected: false);
+    final store = LedgerStore(db);
+    final id = await store.createAccount(phoneScope, name: 'Wallet');
+    final options = await c.read(quickAddOptionsProvider.future);
+    expect([for (final a in options.accounts) a.id], [id]);
+    expect(options.categoryGroups, isNotEmpty);
+
+    final groceries = options.categoryGroups.expand((g) => g.categories).firstWhere((x) => x.name == 'Groceries');
+    final controller = c.read(quickAddControllerProvider.notifier)..applyOptions(options);
+    controller.setAmount('12');
+    controller.setPayee('Corner shop', options: options);
+    controller.setCategory(groceries.id, groceries.name);
+    expect(await controller.save(), isTrue);
+
+    final row = (await store.transactions(id)).single;
+    expect((row.scope, row.amountCents, row.categoryId), (phoneScope, -1200, groceries.id));
+    final local = LocalCategoryStore(db);
+    expect((await local.suggest('Corner shop'))?.categoryId, groceries.id, reason: 'teaches the memory');
+  });
+
+  test('with Actual unreachable, a budget with a copy stays on screen', () async {
+    SharedPreferences.setMockInitialValues({'budget_sync_id': _budget});
     final sp = await SharedPreferences.getInstance();
-    final api = _FakeApi();
-    await tester.binding.setSurfaceSize(const Size(800, 1600));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          sharedPreferencesProvider.overrideWithValue(sp),
-          importerApiProvider.overrideWithValue(api),
-          secretStoreProvider.overrideWithValue(_FakeSecrets()),
-          linkStateProvider.overrideWith((ref) async => LinkState.ready),
-        ],
-        child: const MaterialApp(home: QuickAddScreen()),
-      ),
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await _seedCopy(db);
+    final c = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(sp),
+        appDatabaseProvider.overrideWithValue(db),
+        linkStateProvider.overrideWith(
+          (ref) async => throw const ApiException(message: 'Could not reach the backend.'),
+        ),
+      ],
     );
-    await tester.pumpAndSettle();
+    addTearDown(c.dispose);
+    c.listen(quickAddOptionsProvider, (_, _) {});
+    final options = await c.read(quickAddOptionsProvider.future);
+    expect([for (final a in options.accounts) a.id], ['chk']);
+    expect(await c.read(ledgerScopeProvider.future), _budget);
+  });
 
-    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNull);
-    await tester.enterText(find.byType(TextField).first, '12,30');
-    await tester.enterText(find.byType(TextField).at(1), 'Lid');
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Lidl').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Groceries'), findsOneWidget);
+  group('the screen', () {
+    Future<void> settle(WidgetTester tester) async {
+      for (var i = 0; i < 6; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
 
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-    expect(api.calls.single, {
-      'accountId': 'chk',
-      'amountCents': -1230,
-      'clientId': api.calls.single['clientId'],
-      'payeeName': 'Lidl',
-      'categoryId': 'groc',
+    Future<void> finish(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+
+    Future<AppDatabase> pump(
+      WidgetTester tester, {
+      required bool connected,
+      Map<String, Object> prefs = const {},
+      Widget home = const QuickAddScreen(),
+    }) async {
+      SharedPreferences.setMockInitialValues({if (connected) 'budget_sync_id': _budget, ...prefs});
+      final sp = await SharedPreferences.getInstance();
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(() => tester.runAsync(db.close));
+      if (connected) await tester.runAsync(() => _seedCopy(db));
+      await tester.binding.setSurfaceSize(const Size(800, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: _overrides(sp, db, connected: connected),
+          child: MaterialApp(home: Scaffold(body: home)),
+        ),
+      );
+      await settle(tester);
+      return db;
+    }
+
+    testWidgets('without Actual it never asks to connect: it offers to add an account', (tester) async {
+      await pump(tester, connected: false);
+      expect(find.textContaining('Connect'), findsNothing);
+      expect(find.text('Add an account first'), findsOneWidget);
+      await finish(tester);
+    });
+
+    testWidgets('a budget amount set on a copy of Actual waits to be sent, and the line says so', (tester) async {
+      final db = await pump(tester, connected: true, home: const BudgetScreen());
+      expect(find.textContaining('waiting'), findsNothing);
+      await tester.tap(find.text('Set budget').first);
+      await settle(tester);
+      await tester.enterText(find.byType(TextField).last, '250');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await settle(tester);
+
+      expect(find.text('1 change waiting'), findsOneWidget);
+      final waiting = await tester.runAsync(() => LedgerStore(db).outbox(_budget));
+      expect((waiting!.single.kind, waiting.single.rowId.startsWith('groc|')), ('budget', true));
+      await finish(tester);
+    });
+
+    testWidgets('type an amount, pick a known payee, save', (tester) async {
+      final db = await pump(tester, connected: true);
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save')).onPressed, isNull);
+      await tester.enterText(find.byType(TextField).first, '12,30');
+      await tester.enterText(find.byType(TextField).at(1), 'Lid');
+      await settle(tester);
+      await tester.tap(find.text('Lidl').last);
+      await settle(tester);
+      expect(find.text('Groceries'), findsOneWidget);
+
+      await tester.tap(find.text('Save'));
+      await settle(tester);
+      final rows = await tester.runAsync(() => LedgerStore(db).transactions('chk'));
+      final row = rows!.firstWhere((t) => t.amountCents == -1230);
+      expect((row.payeeId, row.categoryId), ('p1', 'groc'));
+      expect(row.importedId, startsWith('app-'));
+      await finish(tester);
     });
   });
 

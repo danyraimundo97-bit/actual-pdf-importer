@@ -1,8 +1,11 @@
 import 'package:drift/drift.dart';
 
 import '../models/account_page.dart';
+import '../models/actual_account.dart';
+import '../models/actual_category.dart';
 import '../models/budget_month.dart';
 import '../models/dashboard.dart';
+import '../models/quick_add.dart';
 import 'db/app_database.dart';
 import 'ledger_builders.dart';
 import 'ledger_store.dart';
@@ -54,7 +57,7 @@ class LedgerReports {
         await (_db.selectOnly(_db.ledgerTransactions)
               ..addColumns([balance])
               ..where(
-                _db.ledgerTransactions.accountId.equals(accountId) &
+                _db.ledgerTransactions.accountId.equals(account.id) &
                     _db.ledgerTransactions.deleted.equals(false) &
                     _db.ledgerTransactions.parentId.isNull(),
               ))
@@ -97,6 +100,51 @@ class LedgerReports {
       nextCursor: rows.length < limit ? null : '${offset + rows.length}',
     );
   }
+
+  /// The quick-add form's choices, from the ledger, so it works offline: open
+  /// accounts (on budget first), categories, and payees most recent first
+  /// with the category each last had.
+  Future<QuickAddOptions> quickAddOptions(String scope) async {
+    final groups = await _budgetGroups(scope);
+    final accounts = [
+      for (final a in await _store.accounts(scope))
+        if (!a.closed) ActualAccount(id: a.id, name: a.name, offbudget: a.offBudget, closed: false),
+    ]..sort((a, b) => (a.offbudget ? 1 : 0) - (b.offbudget ? 1 : 0));
+    final names = await _store.payeeNames(scope);
+    final rows = (await _store.allTransactions(scope)).where((t) => t.payeeId != null && t.transferId == null && !t.startingBalance).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final recent = <String, RecentPayee>{};
+    for (final t in rows) {
+      final name = names[t.payeeId];
+      if (name == null || recent.containsKey(name)) continue;
+      recent[name] = RecentPayee(name: name, lastCategoryId: t.isParent ? null : t.categoryId);
+      if (recent.length == _recentPayees) break;
+    }
+    return QuickAddOptions(
+      accounts: accounts,
+      categoryGroups: _pickerGroups(groups),
+      incomeGroupIds: {
+        for (final g in groups)
+          if (g.isIncome) g.id,
+      },
+      recentPayees: recent.values.toList(),
+    );
+  }
+
+  static const _recentPayees = 50;
+
+  /// [scope]'s visible categories, for a category picker.
+  Future<List<ActualCategoryGroup>> categoryPicker(String scope) async => _pickerGroups(await _budgetGroups(scope));
+
+  List<ActualCategoryGroup> _pickerGroups(List<LedgerBudgetGroup> groups) => [
+    for (final g in groups)
+      if (g.categories.isNotEmpty)
+        ActualCategoryGroup(
+          id: g.id,
+          name: g.name,
+          categories: [for (final c in g.categories) ActualCategory(id: c.id, name: c.name)],
+        ),
+  ];
 
   /// Every category's name, hidden ones included (old transactions keep
   /// theirs).

@@ -130,6 +130,12 @@ function formatCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
+/** The note a soft-deleted transaction carries, in front of what it had. */
+export function softDeleteNote(amount: number, notes: string | null | undefined, now: Date = new Date()): string {
+  const was = `${REMOVED_NOTE_PREFIX} on ${now.toISOString().slice(0, 10)}, was ${formatCents(amount)}]`;
+  return notes ? `${was} ${notes}` : was;
+}
+
 /** What undoImport changed, for the backend's removal log (removal-log.ts). */
 export interface SoftDeletedTransaction {
   transactionId: string;
@@ -161,7 +167,6 @@ export async function undoImport(
   now: Date = new Date(),
 ): Promise<{ removed: number; skipped: number; softDeleted: SoftDeletedTransaction[] }> {
   const wanted = new Set(transactionIds);
-  const day = now.toISOString().slice(0, 10);
   return session.withBudget(budget, async (actual) => {
     // The whole range: the user may have re-dated a transaction since.
     const all = (await actual.getTransactions(accountId, '1900-01-01', '2999-12-31')) as Array<{
@@ -182,8 +187,7 @@ export async function undoImport(
 
     const softDeleted: SoftDeletedTransaction[] = [];
     for (const t of ours) {
-      const was = `${REMOVED_NOTE_PREFIX} on ${day}, was ${formatCents(t.amount)}]`;
-      await actual.updateTransaction(t.id, { amount: 0, notes: t.notes ? `${was} ${t.notes}` : was });
+      await actual.updateTransaction(t.id, { amount: 0, notes: softDeleteNote(t.amount, t.notes, now) });
       softDeleted.push({
         transactionId: t.id,
         importedId: t.imported_id as string,

@@ -28,4 +28,23 @@ class LedgerApi {
       throw ApiException.fromDio(e);
     }
   }
+
+  /// POST /ledger/push: outbox entries, answered one by one.
+  Future<List<Map<String, dynamic>>> push({
+    required String budgetSyncId,
+    String? budgetPassword,
+    required List<Map<String, dynamic>> entries,
+  }) async {
+    try {
+      final res = await _dio.post(
+        '/ledger/push',
+        data: {'budgetSyncId': budgetSyncId, 'budgetPassword': ?budgetPassword, 'entries': entries},
+        // A long statement is a few hundred rows for Actual to take in.
+        options: Options(receiveTimeout: const Duration(seconds: 120)),
+      );
+      return ((res.data as Map<String, dynamic>)['results'] as List).cast<Map<String, dynamic>>();
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
 }

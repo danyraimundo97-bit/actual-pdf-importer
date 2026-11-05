@@ -231,16 +231,34 @@ final categoryMemoryRevisionProvider = StateProvider<int>((ref) => 0);
 /// (docs/plans/local-ledger.md, Phases 4 and 5): the connected Actual
 /// budget's copy (scope = its sync id), or the phone's own budget
 /// ([phoneScope]) without Actual.
+///
+/// A backend that can't be reached says nothing about Actual: a budget with
+/// a copy on the phone stays shown, and its changes wait.
 final ledgerScopeProvider = FutureProvider.autoDispose<String>((ref) async {
-  if (await ref.watch(linkStateProvider.future) != LinkState.ready) return phoneScope;
-  return ref.watch(appConfigProvider.select((c) => c.budgetSyncId)) ?? phoneScope;
+  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
+  try {
+    if (await ref.watch(linkStateProvider.future) != LinkState.ready) return phoneScope;
+    return budgetSyncId ?? phoneScope;
+  } catch (_) {
+    if (budgetSyncId == null) return phoneScope;
+    return await ref.read(ledgerStoreProvider).hasPulled(budgetSyncId) ? budgetSyncId : phoneScope;
+  }
 });
 
-/// True while the screens show the phone's own budget, which is edited on
-/// the phone. An Actual budget's copy is read-only here until the phone's
-/// changes can be sent (Phase 5b).
+/// True while the screens show the phone's own budget rather than a copy of
+/// an Actual one. Both are edited on the phone; only the wording differs.
 final readsLedgerProvider = FutureProvider.autoDispose<bool>((ref) async {
   return await ref.watch(ledgerScopeProvider.future) == phoneScope;
+});
+
+/// The changes waiting to go to Actual for the budget on screen.
+final ledgerOutboxProvider = StreamProvider.autoDispose<({int waiting, int failed})>((ref) async* {
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope == phoneScope) {
+    yield (waiting: 0, failed: 0);
+    return;
+  }
+  yield* ref.watch(ledgerStoreProvider).watchOutboxSummary(scope);
 });
 
 final ledgerApiProvider = Provider<LedgerApi>((ref) => LedgerApi(ref.watch(apiClientProvider)));

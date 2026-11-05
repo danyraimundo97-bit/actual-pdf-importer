@@ -27,7 +27,8 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
   and better auth first. Planned in `docs/plans/local-ledger.md` (Phases 4–5). Done without Actual
   (Phase 4: the account screen edits and removes the phone's rows); with Actual it comes with the
   sync.
-- **Offline queue for quick add.** Planned in `docs/plans/local-ledger.md` (Phase 6).
+- **Share an account.** Let someone else see or use one account (for example a joint account), not
+  only the whole budget. To be defined: who it's shared with, and whether they can edit.
 - **Local ledger** (`docs/plans/local-ledger.md`): the phone keeps accounts, transactions and budget
   amounts in an encrypted database, so Home and Budget work without Actual, and syncs both ways with
   Actual once it's connected. Budget style is a setting (simple monthly limits or envelopes),
@@ -113,6 +114,10 @@ Architecture: Flutter app → backend (gateway) → Actual server, through the o
   Android and desktop are covered by the tests.
 - **Budget tab:** tell tracking and envelope budgets apart (both render from the same
   `getBudgetMonth` fields today). Covered by the local ledger's budget style (Phases 4 and 7).
+- **Changes Actual refused** (`docs/plans/local-ledger.md`, Phase 5b as built): a screen to see them and
+  discard one. Today the status line counts them and the logs have the code.
+- **Import into Actual offline:** Import still lists Actual's accounts from the backend; read them from
+  the phone's copy of the budget, as quick add does.
 - **Local ledger on a backend without Actual:** copy the phone's ledger to the backend when there's
   a backend but no Actual, so the backend's scheduled backups include it and a second phone gets it.
   Left for later (decided 2026-11-04): a phone with a backend normally connects Actual too, and one

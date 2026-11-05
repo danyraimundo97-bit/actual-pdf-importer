@@ -520,7 +520,46 @@ Phase 5 is built and committed in three parts:
     111 pass. The one failure is the known Node 26 "bad XRef entry" in `pdf-password.test.ts`
     (Todo).
 
+### Phase 5b as built (2026-11-05)
+
+- **Backend:** `POST /ledger/push` (`src/ledger-push.ts`), one budget turn, answered per entry with
+  a code, never a message. A statement's lines go in one `importTransactions` call (separately, a second
+  identical line would fuzzy-match the first) and are found again by `imported_id`, since Actual may
+  match a line to a row it already had. Quick-add rows use `addTransactions` with `app-<clientId>`
+  (or `app-<the row's uuid>`). Edits are whole-row `updateTransaction`s that never touch `imported_id`.
+  Removals are the soft delete plus the removal log. Transfers and splits answer `READ_ONLY`.
+- **Safe to resend:** transactions by `imported_id`; accounts and payees through
+  `ledger-client-ids.json`, since nothing in Actual can carry a phone id; a new payee reuses one of
+  the same name. Carryover flags and on/off budget aren't sent: the phone has no editor for carryover,
+  and Actual doesn't offer changing on/off budget.
+- **Phone:** `LedgerSync.push` sends payees, accounts, transactions, then budget amounts, 200 per
+  request. Answered entries leave the outbox and rows take Actual's ids, along with what points at them.
+  `ledger_id_aliases` (schema 5) keeps the old id working for an open screen or an import's undo. A
+  change made while its entry was on the way bumps the entry's `revision`, so it goes in the next run.
+- **Ledger first:** quick add and Import with Actual write to the ledger, and the sync sends them. Budget
+  amounts and account rows are editable with Actual too. `AppShell` asks for a sync when the number
+  of waiting changes grows. The status line shows "N changes waiting" or "N changes couldn't be sent".
+- **Quick add** now reads its accounts, categories and recent payees from the ledger, so it opens
+  without a backend or Actual, and offers to add an account when there is none. That's Phase 6.
+- **A backend that can't be reached** no longer takes the budget off screen: `ledgerScopeProvider`
+  stays on a budget that has a copy.
+- **Checked** against a real Actual 26.10 server with synthetic rows: new payee, account, opening
+  balance, quick add, two identical statement lines, budget amount, all sent twice without duplicates;
+  then an edit, a soft delete, a rename, closing an account with money in it (refused), and a row gone
+  from Actual; a following pull returned the changes.
+- **Not yet:**
+  - Import still lists Actual's accounts from the backend, so importing into Actual needs a connection.
+  - A refused change stays until it's changed or Actual accepts it. There's no screen to see or
+    discard it, only the status line and the logs.
+  - An opening balance sent to Actual has the flag but neither the "Starting Balance" payee nor the
+    category Actual gives its own. Accounts can't be added to an Actual budget on the phone yet, so
+    this first matters in 5c.
+  - A row removed on the phone before its first answer arrived comes back with the next pull if
+    Actual did get it.
+
 ## Phase 6: Quick add offline
+
+Built with 5b (see "Phase 5b as built").
 
 - Quick add writes to the ledger (accounts and categories from the phone, `app-<clientId>`) and
   teaches the category memory. It works with no connection, and the sync sends it later. This covers

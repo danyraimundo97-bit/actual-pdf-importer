@@ -2,9 +2,10 @@ import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/errors/api_exception.dart';
 import '../../core/format/money.dart';
 import '../../core/log/app_log.dart';
+import '../../data/local/db/local_category_store.dart';
+import '../../data/local/ledger_store.dart';
 import '../../data/models/quick_add.dart';
 import '../../data/ledger_sync_controller.dart';
 import '../../data/providers.dart';
@@ -100,10 +101,12 @@ class QuickAddState {
   }
 }
 
-/// GET /quick-add/options for the active budget.
-final quickAddOptionsProvider = FutureProvider.autoDispose<QuickAddOptions>((ref) {
-  final budgetSyncId = ref.watch(appConfigProvider.select((c) => c.budgetSyncId));
-  return ref.watch(importerApiProvider).getQuickAddOptions(budgetSyncId: budgetSyncId);
+/// The form's choices, from the ledger: the phone's own budget, or the copy
+/// of an Actual one, so adding works with no connection.
+final quickAddOptionsProvider = FutureProvider.autoDispose<QuickAddOptions>((ref) async {
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope != phoneScope) await ref.read(ledgerSyncProvider.notifier).ensurePulled(scope);
+  return ref.watch(ledgerReportsProvider).quickAddOptions(scope);
 });
 
 class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
@@ -156,39 +159,43 @@ class QuickAddController extends AutoDisposeNotifier<QuickAddState> {
 
   void setNotes(String notes) => state = state.copyWith(notes: notes);
 
-  /// Adds the transaction. On failure the form keeps everything (and the
-  /// same clientId), so trying again can't create a duplicate.
+  /// Adds the transaction to the ledger; the sync takes it to Actual when
+  /// there is one. On failure the form keeps everything, and the same
+  /// clientId means trying again can't add it twice.
   Future<bool> save() async {
     final amountCents = state.amountCents;
     final accountId = state.accountId;
     if (amountCents == null || accountId == null || state.saving) return false;
     state = state.copyWith(saving: true, clearError: true);
-    final config = ref.read(appConfigProvider);
+    final payee = state.payee.trim();
+    final categoryId = state.categoryId;
+    final store = ref.read(ledgerStoreProvider);
     try {
-      final password = config.budgetSyncId == null
-          ? null
-          : await ref.read(secretStoreProvider).budgetPassword(config.budgetSyncId!);
-      final result = await ref.read(importerApiProvider).addTransaction(
-            accountId: accountId,
-            date: state.date,
-            amountCents: amountCents,
-            clientId: state.clientId,
-            payeeName: state.payee.trim().isEmpty ? null : state.payee.trim(),
-            categoryId: state.categoryId,
-            notes: state.notes.trim().isEmpty ? null : state.notes.trim(),
-            budgetSyncId: config.budgetSyncId,
-            budgetPassword: password,
-          );
-      _log.info('Transaction saved', {'accountId': accountId, 'id': result.id, 'created': result.created});
+      final id = await store.addTransaction(
+        accountId,
+        LedgerDraft(
+          date: state.date,
+          amountCents: amountCents,
+          payee: payee.isEmpty ? null : payee,
+          categoryId: categoryId,
+          notes: state.notes.trim().isEmpty ? null : state.notes.trim(),
+          importedId: 'app-${state.clientId}',
+        ),
+      );
+      _log.info('Transaction saved', {'accountId': accountId, 'id': id, 'created': id != null});
       await ref.read(settingsStoreProvider).setLastAccountId(accountId);
-      // Home and Budget read the phone's copy of the budget: fetch the new
-      // row into it.
+      // With Actual the backend learns this when the row arrives; here it's
+      // the phone's own memory.
+      if (payee.isNotEmpty && categoryId != null && LocalCategoryStore.isLocalId(categoryId)) {
+        await ref.read(localCategoryStoreProvider).remember(payee, categoryId);
+        ref.read(categoryMemoryRevisionProvider.notifier).state++;
+      }
       ref.read(ledgerSyncProvider.notifier).request(delay: Duration.zero);
       state = state.copyWith(saving: false);
       return true;
-    } on ApiException catch (e) {
-      _log.warn('Transaction not saved', {'code': e.code, 'status': e.statusCode});
-      state = state.copyWith(saving: false, error: e.message);
+    } catch (e, stack) {
+      _log.error('Transaction not saved', e, stack, {'accountId': accountId});
+      state = state.copyWith(saving: false, error: 'Could not save the transaction on this phone.');
       return false;
     }
   }
