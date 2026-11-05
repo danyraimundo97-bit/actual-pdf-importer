@@ -114,6 +114,71 @@ class LocalCategoryStore {
         );
   }
 
+  /// The category a payee is remembered with in this scope, or null.
+  Future<String?> rememberedCategory(String payee, {String? budgetSyncId}) async {
+    final row =
+        await (_db.select(_db.payeeCategories)..where(
+              (p) =>
+                  p.budgetSyncId.equals(budgetSyncId ?? '') &
+                  p.payeeKey.equals(categoryMemoryKey(payee)) &
+                  p.deleted.equals(false),
+            ))
+            .getSingleOrNull();
+    return row?.categoryId;
+  }
+
+  /// Remembers a payee with one of an Actual budget's categories. The memory
+  /// holds the phone's ids and the category sync sends them as Actual's, so
+  /// this goes through a linked category, or a copy of the Actual one (as the
+  /// sync makes). Returns the phone's id, which is what to restore on undo.
+  Future<String> rememberActual(String payee, String budgetSyncId, String actualCategoryId) => _db.transaction(() async {
+    final links =
+        await (_db.select(_db.categoryLinks)
+              ..where((l) => l.budgetSyncId.equals(budgetSyncId) & l.actualCategoryId.equals(actualCategoryId)))
+            .get();
+    // Your own category over a copy, when there are both.
+    final linked = links.where((l) => !l.categoryId.startsWith('actual:')).firstOrNull ?? links.firstOrNull;
+    final categoryId = linked?.categoryId ?? await _copyOfLedgerCategory(budgetSyncId, actualCategoryId);
+    await remember(payee, categoryId, budgetSyncId: budgetSyncId);
+    return categoryId;
+  });
+
+  Future<String> _copyOfLedgerCategory(String budget, String actualId) async {
+    final row =
+        await (_db.select(_db.ledgerCategories)..where((c) => c.scope.equals(budget) & c.id.equals(actualId))).getSingle();
+    final groupId = 'actual:${row.groupId}';
+    final categoryId = 'actual:$actualId';
+    await _db
+        .into(_db.categoryGroups)
+        .insertOnConflictUpdate(
+          CategoryGroupsCompanion.insert(
+            id: groupId,
+            name: row.groupName,
+            sort: 1000 + row.groupSort,
+            source: 'actual',
+            updatedAt: 0,
+          ),
+        );
+    await _db
+        .into(_db.categories)
+        .insertOnConflictUpdate(
+          CategoriesCompanion.insert(
+            id: categoryId,
+            groupId: groupId,
+            name: row.name,
+            sort: row.sort,
+            source: 'actual',
+            updatedAt: 0,
+          ),
+        );
+    await _db
+        .into(_db.categoryLinks)
+        .insertOnConflictUpdate(
+          CategoryLinksCompanion.insert(categoryId: categoryId, budgetSyncId: budget, actualCategoryId: actualId),
+        );
+    return categoryId;
+  }
+
   /// Forgets a mapping, leaving a tombstone for the sync.
   Future<void> forget(String payee, {String? budgetSyncId}) {
     return (_db.update(_db.payeeCategories)

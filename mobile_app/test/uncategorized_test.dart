@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mobile_app/data/local/db/app_database.dart';
+import 'package:mobile_app/data/local/db/local_category_store.dart';
+import 'package:mobile_app/data/local/db/preset_categories.dart';
 import 'package:mobile_app/data/local/ledger_builders.dart';
 import 'package:mobile_app/data/local/ledger_reports.dart';
 import 'package:mobile_app/data/local/ledger_store.dart';
@@ -95,6 +97,7 @@ void main() {
     await tester.runAsync(() async {
       id = await account();
       await store.addTransaction(id, draft(-100, payee: 'Bakery'));
+      await store.addTransaction(id, draft(-150, payee: 'Bakery', daysAgo: 3));
       await store.addTransaction(id, draft(-200, payee: 'Kiosk'));
     });
     SharedPreferences.setMockInitialValues({'onboarded': true});
@@ -126,24 +129,60 @@ void main() {
     );
     await settle();
 
-    await tester.tap(find.text('2 transactions in the last 30 days without a category'));
+    await tester.tap(find.text('3 transactions in the last 30 days without a category'));
     await settle();
     expect(find.text('Without a category'), findsOneWidget);
-    expect(find.text('Bakery'), findsOneWidget);
     expect(find.text('Kiosk'), findsOneWidget);
 
-    await tester.tap(find.text('Bakery'));
+    expect(find.text('Bakery'), findsNWidgets(2));
+    await tester.tap(find.text('Bakery').first);
     await settle();
     await tester.tap(find.text('Groceries'));
     await settle();
 
+    // Both of the payee's rows took it, and the other payee didn't.
     expect(find.text('Bakery'), findsNothing);
     expect(find.text('Kiosk'), findsOneWidget);
-    expect(find.text('Moved to Groceries.'), findsOneWidget);
+    expect(find.text('2 from Bakery moved to Groceries. Next time too.'), findsOneWidget);
     final rows = await tester.runAsync(() => store.transactions(id));
-    expect(rows!.firstWhere((t) => t.amountCents == -100).categoryId, 'preset:food.groceries');
+    expect(rows!.where((t) => t.categoryId == presetId('food.groceries')), hasLength(2));
+    final memory = LocalCategoryStore(db);
+    expect(await tester.runAsync(() => memory.suggest('BAKERY')), isNotNull);
+
+    await tester.tap(find.text('Undo'));
+    await settle();
+    expect(find.text('Bakery'), findsNWidgets(2));
+    expect(await tester.runAsync(() => memory.rememberedCategory('Bakery')), isNull);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(milliseconds: 1));
+  });
+
+  test('with Actual the memory goes through a link, or a copy the category sync can send', () async {
+    final memory = LocalCategoryStore(db);
+    Future<void> category(String id, String name) => db
+        .into(db.ledgerCategories)
+        .insert(
+          LedgerCategoriesCompanion.insert(
+            scope: 'b1',
+            id: id,
+            name: name,
+            sort: 0,
+            groupId: 'g',
+            groupName: 'Everyday',
+            groupSort: 0,
+          ),
+        );
+    await category('a-groc', 'Supermercado');
+    await category('a-pets', 'Pets');
+    await memory.link(presetId('food.groceries'), 'b1', 'a-groc');
+
+    expect(await memory.rememberActual('Lidl', 'b1', 'a-groc'), presetId('food.groceries'));
+    expect(await memory.rememberActual('Vet', 'b1', 'a-pets'), 'actual:a-pets');
+    expect((await memory.links('b1'))['actual:a-pets'], 'a-pets');
+    expect(await memory.rememberedCategory('Vet', budgetSyncId: 'b1'), 'actual:a-pets');
+    // The phone's own lists stay free of the copy.
+    final own = await memory.allGroups();
+    expect(own.expand((g) => g.categories).map((c) => c.id), isNot(contains('actual:a-pets')));
   });
 }
