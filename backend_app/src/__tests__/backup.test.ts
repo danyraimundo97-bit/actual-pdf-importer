@@ -77,6 +77,17 @@ test('app data: a newer schema or a foreign file is refused', async () => {
       ),
     { code: 'BACKUP_TOO_NEW' },
   );
+  // A phone's file: readable, with its own budget left out of what's restored here.
+  const phone = backup.readAppDataBackup(
+    gz({
+      manifest: { kind: 'app-data', schemaVersion: 2 },
+      appCategories: [],
+      mappings: [],
+      removals: [],
+      ledger: { accounts: [] },
+    }),
+  );
+  assert.equal(phone.manifest.schemaVersion, 2);
   assert.throws(() => backup.readAppDataBackup(Buffer.from('not gzip')), { code: 'BACKUP_INVALID' });
   assert.throws(() => backup.readAppDataBackup(gz({ hello: 1 })), { code: 'BACKUP_INVALID' });
 });

@@ -237,7 +237,7 @@ class _BackupsScreenState extends ConsumerState<BackupsScreen> {
     final ok = await _confirm(
       title: 'Import app data?',
       message:
-          "This phone's categories and category memory are replaced by the file's. "
+          "This phone's categories, category memory and own accounts and transactions are replaced by the file's. "
           '${_hasBackend ? 'The backend and your other phones get it on the next sync.' : ''}',
       action: 'Import',
     );
@@ -245,10 +245,16 @@ class _BackupsScreenState extends ConsumerState<BackupsScreen> {
     try {
       final result = await importAppDataFile(ref.read(appDatabaseProvider), bytes);
       ref.read(categoryMemoryRevisionProvider.notifier).state++;
-      _log.info('App data imported', {'mappings': result.mappings, 'skipped': result.skipped});
+      _log.info('App data imported', {
+        'mappings': result.mappings,
+        'accounts': result.accounts,
+        'transactions': result.transactions,
+        'skipped': result.skipped,
+      });
       _snack(
-        'Imported: ${result.mappings} remembered payees'
-        '${result.skipped == 0 ? '' : ', ${result.skipped} skipped (their category isn’t on this phone)'}.',
+        'Imported: ${result.accounts} accounts, ${result.transactions} transactions and '
+        '${result.mappings} remembered payees'
+        '${result.skipped == 0 ? '' : ', ${result.skipped} skipped'}.',
       );
     } on AppDataFileException catch (e) {
       _snack(e.message);
@@ -310,9 +316,11 @@ class _BackupsScreenState extends ConsumerState<BackupsScreen> {
             _SectionTitle(hasBackend ? 'On this phone' : 'App data'),
             Text(
               hasBackend
-                  ? 'A file with the categories and category memory on this phone, to keep or move by hand.'
-                  : 'Without a backend there are no scheduled backups. Export the categories and category '
-                        'memory to a file you keep, and import it on a new phone.',
+                  ? 'A file with the categories, category memory and own accounts and transactions on this phone, '
+                        "to keep or move by hand. It isn't encrypted, so keep it somewhere safe."
+                  : 'Without a backend there are no scheduled backups. Export your categories, category memory, '
+                        "accounts and transactions to a file you keep, and import it on a new phone. It isn't "
+                        'encrypted, so keep it somewhere safe.',
               style: _muted(context),
             ),
             const SizedBox(height: Space.lg),

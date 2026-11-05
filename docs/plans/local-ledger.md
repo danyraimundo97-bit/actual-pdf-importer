@@ -633,6 +633,18 @@ Built with 5b (see "Phase 5b as built").
   restores.
 - Restoring writes the rows as new edits, as the categories do.
 
+### Phase 8 as built (2026-11-05)
+
+- App-data files from the phone are version 2, with `ledger`: the phone's own accounts, payees, transactions,
+  budget amounts and budget style. Budgets from Actual aren't in it. Backends still write version 1, and read
+  both, ignoring `ledger`.
+- **Restoring** is one database transaction. Rows in the file are written as new edits and live rows not in it
+  are removed, as mappings are. A file with no `ledger` leaves the phone's budget alone.
+- **A row that has since moved into a budget from Actual stays there** (found by its scope or its id alias):
+  restoring it would pull it out of that budget or send it twice.
+- The file holds amounts and isn't encrypted, unlike the database. The Backups screen says so.
+- Not yet seen on a phone.
+
 ## Not in this plan
 
 - Copying the ledger to a backend without Actual, for its scheduled backups and a second phone

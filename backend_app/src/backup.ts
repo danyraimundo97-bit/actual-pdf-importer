@@ -27,6 +27,11 @@ const log = logger.child({ area: 'backup' });
 
 export const APP_DATA_FOLDER = 'app-data';
 export const APP_DATA_SCHEMA_VERSION = 1;
+/**
+ * What this backend can read. A phone's file is version 2: it adds `ledger`, the
+ * phone's own budget, which stays on phones and is ignored here.
+ */
+export const APP_DATA_READABLE_VERSION = 2;
 /** Suffix of the safety copy a restore makes first; never pruned. */
 export const BEFORE_RESTORE = '-before-restore';
 
@@ -204,7 +209,7 @@ export function readAppDataBackup(bytes: Buffer): AppDataBackup {
   if (!manifest || manifest.kind !== 'app-data' || typeof manifest.schemaVersion !== 'number') {
     throw new BackupInvalidError();
   }
-  if (manifest.schemaVersion > APP_DATA_SCHEMA_VERSION) throw new BackupTooNewError();
+  if (manifest.schemaVersion > APP_DATA_READABLE_VERSION) throw new BackupTooNewError();
   if (!Array.isArray(d.appCategories) || !Array.isArray(d.mappings) || !Array.isArray(d.removals)) {
     throw new BackupInvalidError();
   }

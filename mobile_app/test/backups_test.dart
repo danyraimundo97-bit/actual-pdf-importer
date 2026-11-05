@@ -13,6 +13,8 @@ import 'package:mobile_app/data/local/db/app_data_file.dart';
 import 'package:mobile_app/data/local/db/app_database.dart';
 import 'package:mobile_app/data/local/db/local_category_store.dart';
 import 'package:mobile_app/data/local/db/preset_categories.dart';
+import 'package:mobile_app/data/local/ledger_move.dart';
+import 'package:mobile_app/data/local/ledger_store.dart';
 import 'package:mobile_app/data/models/backup_status.dart';
 import 'package:mobile_app/data/providers.dart';
 import 'package:mobile_app/features/backups/screens/backups_screen.dart';
@@ -65,6 +67,100 @@ void main() {
       expect(names[pets], 'Pets');
       expect((await otherStore.mappings()).map((m) => m.payee), ['LIDL']);
       expect((await otherStore.mappings(budgetSyncId: 'b1')).single.categoryId, pets);
+    });
+
+    group('the own budget', () {
+      late LedgerStore ledger;
+      final day = DateTime(2026, 10, 15);
+      setUp(() => ledger = LedgerStore(db));
+
+      test('export → import brings back accounts, rows, amounts and the style, without Actual budgets', () async {
+        final id = await ledger.createAccount(phoneScope, name: 'Cash', openingBalanceCents: 1000);
+        await ledger.addTransaction(id, LedgerDraft(date: day, amountCents: -500, payee: 'Bakery'));
+        await ledger.setBudget(phoneScope, presetId('food.groceries'), '2026-10', 30000);
+        await ledger.setBudgetMode(phoneScope, 'envelope');
+        final other = await ledger.createAccount('b1', name: 'Actual account');
+
+        final file = await exportAppDataFile(db, appVersion: '1.0.0');
+        expect(_decode(file)['ledger']['accounts'].map((a) => a['name']), ['Cash']);
+
+        final there = AppDatabase(NativeDatabase.memory());
+        addTearDown(there.close);
+        final thereLedger = LedgerStore(there);
+        final result = await importAppDataFile(there, file);
+
+        expect((result.accounts, result.transactions), (1, 2));
+        expect((await thereLedger.accounts(phoneScope)).single.name, 'Cash');
+        expect(await thereLedger.account(other), isNull);
+        final rows = await thereLedger.transactions(id);
+        expect(rows.map((t) => t.amountCents), unorderedEquals([1000, -500]));
+        expect((await thereLedger.payeeNames(phoneScope)).values, ['Bakery']);
+        expect(await thereLedger.budgets(phoneScope, '2026-10'), {presetId('food.groceries'): 30000});
+        expect(await thereLedger.budgetMode(phoneScope), 'envelope');
+      });
+
+      test('what the file lacks is removed, and only from the own budget', () async {
+        final kept = await ledger.createAccount(phoneScope, name: 'Kept');
+        final file = await exportAppDataFile(db, appVersion: '1.0.0');
+        final later = await ledger.createAccount(phoneScope, name: 'Later');
+        await ledger.addTransaction(later, LedgerDraft(date: day, amountCents: -1));
+        await ledger.addTransaction(kept, LedgerDraft(date: day, amountCents: -2));
+        final actual = await ledger.createAccount('b1', name: 'In Actual');
+        await ledger.addTransaction(actual, LedgerDraft(date: day, amountCents: -3));
+
+        await importAppDataFile(db, file);
+
+        expect((await ledger.accounts(phoneScope)).map((a) => a.id), [kept]);
+        expect((await ledger.allTransactions(phoneScope)).where((t) => !t.deleted), isEmpty);
+        expect((await ledger.allTransactions('b1')).single.amountCents, -3);
+      });
+
+      test('a row that has gone into a budget stays there', () async {
+        final id = await ledger.createAccount(phoneScope, name: 'Cash');
+        final row = await ledger.addTransaction(id, LedgerDraft(date: day, amountCents: -500));
+        final file = await exportAppDataFile(db, appVersion: '1.0.0');
+        await LedgerMove(db).intoBudget('b1', accounts: {id: null}, links: const {});
+
+        final result = await importAppDataFile(db, file);
+
+        expect(result.skipped, greaterThan(0));
+        expect(await ledger.accounts(phoneScope), isEmpty);
+        expect((await ledger.transaction(row!))!.scope, 'b1');
+      });
+
+      test('a version 1 file leaves it alone', () async {
+        final id = await ledger.createAccount(phoneScope, name: 'Cash');
+        await importAppDataFile(
+          db,
+          _encode({
+            'manifest': {'kind': 'app-data', 'schemaVersion': 1},
+            'appCategories': <Object>[],
+            'mappings': <Object>[],
+          }),
+        );
+        expect((await ledger.accounts(phoneScope)).single.id, id);
+      });
+
+      test('a damaged ledger changes nothing', () async {
+        final id = await ledger.createAccount(phoneScope, name: 'Cash');
+        await expectLater(
+          importAppDataFile(
+            db,
+            _encode({
+              'manifest': {'kind': 'app-data', 'schemaVersion': 2},
+              'appCategories': <Object>[],
+              'mappings': <Object>[],
+              'ledger': {
+                'accounts': [
+                  {'id': 7},
+                ],
+              },
+            }),
+          ),
+          throwsA(isA<AppDataFileException>().having((e) => e.code, 'code', 'BACKUP_INVALID')),
+        );
+        expect((await ledger.accounts(phoneScope)).single.id, id);
+      });
     });
 
     test("a backend backup's Actual ids land through the phone's links", () async {
