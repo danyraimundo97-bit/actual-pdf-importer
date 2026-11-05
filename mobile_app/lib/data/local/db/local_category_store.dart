@@ -174,8 +174,9 @@ class LocalCategoryStore {
         ),
       );
 
-  /// Ids of the categories the memory points to, in this budget's scope or
-  /// the unscoped one: the ones worth matching.
+  /// Ids of the categories in use: what the memory points to, in this budget's
+  /// scope or the unscoped one, and what the phone's own rows use. The ones
+  /// worth matching.
   Future<Set<String>> categoriesInUse({String? budgetSyncId}) async {
     final rows =
         await (_db.selectOnly(_db.payeeCategories, distinct: true)
@@ -185,7 +186,17 @@ class LocalCategoryStore {
                     _db.payeeCategories.budgetSyncId.isIn({budgetSyncId ?? '', ''}),
               ))
             .get();
-    return {for (final r in rows) r.read(_db.payeeCategories.categoryId)!};
+    // The phone's own transactions and budget amounts count too: they go into
+    // the budget when its accounts are brought over.
+    final transactions = await (_db.select(_db.ledgerTransactions)
+          ..where((t) => t.scope.equals('') & t.deleted.equals(false) & t.categoryId.isNotNull()))
+        .get();
+    final budgets = await (_db.select(_db.ledgerBudgets)..where((b) => b.scope.equals('') & b.budgetedCents.equals(0).not())).get();
+    return {
+      for (final r in rows) r.read(_db.payeeCategories.categoryId)!,
+      for (final t in transactions) t.categoryId!,
+      for (final b in budgets) b.categoryId,
+    };
   }
 
   // --- Managing the categories themselves (Settings → Categories) -------

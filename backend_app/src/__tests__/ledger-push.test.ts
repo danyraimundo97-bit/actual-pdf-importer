@@ -45,6 +45,11 @@ function fakeBudget(start: { rows?: Row[] } = {}) {
   const fake = makeFakeAdapter({
     getAccounts: async () => accounts,
     getPayees: async () => payees,
+    getCategories: async () => [
+      { id: 'c-food', name: 'Food', is_income: false },
+      { id: 'c-pay', name: 'Paycheck', is_income: true },
+      { id: 'c-start', name: 'Starting Balances', is_income: true },
+    ],
     getTransactions: async (account: string) => rows.filter((r) => r.account === account),
     importTransactions: async (account: string, lines: Array<Record<string, unknown>>) => {
       calls.imports.push({ account, lines });
@@ -183,6 +188,8 @@ test('a new account and its rows arrive in one push; a resend finds the same acc
   assert.equal(first.results.length, 2);
   assert.ok(first.results.every((r) => r.ok));
   assert.equal(calls.adds[0].starting_balance_flag, true);
+  assert.equal(calls.adds[0].payee_name, 'Starting Balance');
+  assert.equal(calls.adds[0].category, 'c-start');
 
   const second = await pushLedger(session, BUDGET, entries, ids);
   assert.deepEqual(calls.created, ['Cash']);

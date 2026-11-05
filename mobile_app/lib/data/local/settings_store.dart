@@ -11,6 +11,7 @@ class SettingsStore {
   static const _kOnboarded = 'onboarded';
   static const _kDebugLogging = 'debug_logging';
   static const _kParseOnDevice = 'parse_on_device';
+  static const _kMoveDismissedPrefix = 'move_phone_accounts_dismissed_';
   static const _kSkippedMatchesPrefix = 'category_match_skipped:';
   static const _kSyncCursorPrefix = 'category_sync_cursor:';
   static const _kSyncWatermarkPrefix = 'category_sync_watermark:';
@@ -59,6 +60,11 @@ class SettingsStore {
       (_prefs.getStringList('$_kSkippedMatchesPrefix$budgetSyncId') ?? const []).toSet();
   Future<void> setSkippedCategoryMatches(String budgetSyncId, Set<String> ids) =>
       _prefs.setStringList('$_kSkippedMatchesPrefix$budgetSyncId', ids.toList()..sort());
+
+  /// "Not now" on Home's offer to bring the phone's accounts into a budget.
+  bool phoneAccountsOfferDismissed(String budgetSyncId) => _prefs.getBool('$_kMoveDismissedPrefix$budgetSyncId') ?? false;
+  Future<void> dismissPhoneAccountsOffer(String budgetSyncId) =>
+      _prefs.setBool('$_kMoveDismissedPrefix$budgetSyncId', true);
 
   /// Category sync bookkeeping, per budget ('' = none): the backend's `now`
   /// from the last sync (its clock), and when that sync started on the phone

@@ -7,6 +7,7 @@ import '../data/providers.dart';
 import 'log/error_hooks.dart';
 import '../features/accounts/screens/accounts_settings_screen.dart';
 import '../features/accounts/screens/account_screen.dart';
+import '../features/accounts/screens/move_accounts_screen.dart';
 import '../features/backups/screens/backups_screen.dart';
 import '../features/budget/screens/budget_screen.dart';
 import '../features/categories/screens/categories_screen.dart';
@@ -68,6 +69,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/match-categories',
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => const MatchCategoriesScreen(),
+      ),
+      GoRoute(
+        path: '/move-accounts',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const MoveAccountsScreen(),
       ),
       GoRoute(
         path: '/add',

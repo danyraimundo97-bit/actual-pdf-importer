@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/format/money.dart';
 import '../../../core/log/app_log.dart';
@@ -93,6 +94,14 @@ class AccountsSettingsScreen extends ConsumerWidget {
                 'Kept on this phone. Statements you review and transactions you add go into them.',
                 style: context.text.bodyMedium?.copyWith(color: context.colors.onSurfaceVariant),
               ),
+              if ((ref.watch(phoneAccountsToMoveProvider).valueOrNull ?? 0) > 0)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => context.push('/move-accounts'),
+                    child: Text('Bring them into ${ref.watch(appConfigProvider).budgetName ?? 'your budget'}'),
+                  ),
+                ),
               const SizedBox(height: Space.lg),
               if (open.isNotEmpty) SettingsGroup(children: [for (final v in open) _row(context, ref, v)]),
               if (closed.isNotEmpty) ...[

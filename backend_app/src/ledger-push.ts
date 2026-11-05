@@ -392,12 +392,13 @@ async function putTransaction(
   checkTransactionRefs(accountId, entry.categoryId);
 
   if (PHONE_ID.test(entry.id)) {
+    const opening = entry.startingBalance ? await startingBalanceLook(port) : undefined;
     const result = await addManualInTurn(port, {
       accountId,
       date: entry.date,
       amountCents: entry.amountCents,
-      payeeName: entry.payeeName ?? undefined,
-      categoryId: entry.categoryId ?? undefined,
+      payeeName: opening?.payeeName ?? entry.payeeName ?? undefined,
+      categoryId: opening?.categoryId ?? entry.categoryId ?? undefined,
       notes: entry.notes ?? undefined,
       importedId: entry.importedId?.startsWith(MANUAL_ID_PREFIX)
         ? entry.importedId
@@ -427,6 +428,18 @@ async function putTransaction(
     cleared: entry.cleared === true,
   });
   return {};
+}
+
+/**
+ * What Actual gives an account's opening balance itself: the "Starting
+ * Balance" payee and the income category of that name (or, as Actual does, the
+ * first income category). Without them it counts as uncategorized in Actual.
+ */
+async function startingBalanceLook(port: ActualPort): Promise<{ payeeName: string; categoryId?: string }> {
+  const categories = (await port.getCategories()) as Array<{ id: string; name: string; is_income?: boolean | number }>;
+  const income = categories.filter((c) => truthy(c.is_income));
+  const category = income.find((c) => c.name.trim().toLowerCase() === 'starting balances') ?? income[0];
+  return { payeeName: 'Starting Balance', categoryId: category?.id };
 }
 
 /** The soft delete, as POST /import/undo: nothing is deleted in Actual. */

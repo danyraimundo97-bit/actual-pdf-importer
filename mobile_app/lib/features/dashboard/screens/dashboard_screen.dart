@@ -84,7 +84,7 @@ class DashboardScreen extends ConsumerWidget {
               );
             }
             if (data.isEmpty) {
-              return EmptyState(
+              final empty = EmptyState(
                 icon: Icons.insights_outlined,
                 title: 'Nothing to show yet',
                 message: onPhone
@@ -93,6 +93,13 @@ class DashboardScreen extends ConsumerWidget {
                           'show up here.',
                 actionLabel: 'Import a statement',
                 onAction: () => context.go('/import'),
+              );
+              // A new budget is where the phone's accounts are most at home.
+              return Column(
+                children: [
+                  const _Padded(_MoveAccountsOffer(top: Space.xl)),
+                  Expanded(child: empty),
+                ],
               );
             }
             return RefreshIndicator(
@@ -128,6 +135,7 @@ class _DashboardBody extends StatelessWidget {
       padding: const EdgeInsets.only(top: Space.xl, bottom: Space.xxl * 3),
       children: [
         _Padded(_NetWorth(cents: data.netWorthCents, budgetName: budgetName, onPhone: onPhone)),
+        const _Padded(_MoveAccountsOffer()),
         if (month != null) ...[const SizedBox(height: Space.xl), _Padded(_ThisMonth(month: month, budget: budget))],
         if (data.uncategorizedCount > 0) ...[
           const SizedBox(height: Space.md),
@@ -211,6 +219,69 @@ class _EasedCents extends StatelessWidget {
     curve: Motion.easeOut,
     builder: (context, value, _) => builder(context, value),
   );
+}
+
+/// With Actual connected, the phone's own accounts aren't on screen. This says
+/// so, once per budget: "Not now" leaves them, and Settings › Accounts still
+/// has the way.
+class _MoveAccountsOffer extends ConsumerStatefulWidget {
+  final double top;
+
+  const _MoveAccountsOffer({this.top = Space.lg});
+
+  @override
+  ConsumerState<_MoveAccountsOffer> createState() => _MoveAccountsOfferState();
+}
+
+class _MoveAccountsOfferState extends ConsumerState<_MoveAccountsOffer> {
+  Future<void> _notNow(String budget) async {
+    await ref.read(settingsStoreProvider).dismissPhoneAccountsOffer(budget);
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = ref.watch(phoneAccountsToMoveProvider).valueOrNull ?? 0;
+    final budget = ref.watch(appConfigProvider).budgetSyncId;
+    if (count == 0 || budget == null || ref.read(settingsStoreProvider).phoneAccountsOfferDismissed(budget)) {
+      return const SizedBox.shrink();
+    }
+    final name = ref.watch(appConfigProvider).budgetName ?? 'this budget';
+    return Padding(
+      padding: EdgeInsets.only(top: widget.top),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(Space.lg, Space.md, Space.sm, Space.xs),
+        decoration: BoxDecoration(
+          borderRadius: Radii.controlAll,
+          border: Border.all(color: context.colors.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              count == 1 ? 'One account is only on this phone' : '$count accounts are only on this phone',
+              style: context.text.titleSmall,
+            ),
+            const SizedBox(height: Space.xs),
+            Padding(
+              padding: const EdgeInsets.only(right: Space.sm),
+              child: Text(
+                'Bring them into $name to see them here and keep them in step with Actual.',
+                style: context.text.bodySmall?.copyWith(color: context.colors.onSurfaceVariant),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(onPressed: () => _notNow(budget), child: const Text('Not now')),
+                TextButton(onPressed: () => context.push('/move-accounts'), child: const Text('Bring them over')),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _NetWorth extends StatelessWidget {

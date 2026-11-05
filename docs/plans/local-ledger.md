@@ -551,11 +551,45 @@ Phase 5 is built and committed in three parts:
   - Import still lists Actual's accounts from the backend, so importing into Actual needs a connection.
   - A refused change stays until it's changed or Actual accepts it. There's no screen to see or
     discard it, only the status line and the logs.
-  - An opening balance sent to Actual has the flag but neither the "Starting Balance" payee nor the
-    category Actual gives its own. Accounts can't be added to an Actual budget on the phone yet, so
-    this first matters in 5c.
   - A row removed on the phone before its first answer arrived comes back with the next pull if
     Actual did get it.
+
+### Phase 5c as built (2026-11-05)
+
+- **Offered, never automatic:** with Actual connected, Home says how many accounts are only on the phone
+  ("Not now" is remembered per budget; Settings › Accounts keeps the way in). `/move-accounts` lists each
+  account with where it goes: a new account, or one of the budget's (one with the same name is preselected).
+  Categories with the same name link by themselves; the rest go through "Match your categories", and the
+  screen says how many transactions would arrive without a category.
+- **The move is local:** `LedgerMove.intoBudget` is one database transaction with no network. Rows join the
+  budget's copy with their outbox entries and the normal sync sends them, so a failure can't leave it half
+  done and it also works with the backend away.
+- **What it decides:**
+  - An account joining another leaves its opening balance behind, since that one has its own.
+  - A payee joins the budget's payee of the same name; phone payees nothing uses aren't sent.
+  - A local category id never goes: it's translated through `category_links` or dropped.
+  - A budget amount only fills an empty spot, and amounts of unlinked categories stay on the phone.
+  - Removed rows that were never sent are dropped.
+- **Opening balances:** the push gives them Actual's "Starting Balance" payee and starting balances category.
+- **Checked** with tests, and the opening balance against a real Actual 26.10 server with synthetic rows. The
+  whole move hasn't run against a real server or on a phone.
+- **Not yet:**
+  - A closed account arrives open (the screen says so): the push never closes a new account while its
+    rows are on their way.
+  - A row that's already in Actual but wasn't imported from a statement (typed in both places) arrives
+    as a second row. Statement lines are matched by `importedId`.
+
+### Category emojis (2026-11-05)
+
+- Presets have one by key (`PresetCategory.emoji`, Emoji 2 or older, for Android 6). `categories.emoji`
+  (schema 6) holds the user's choice: null = not chosen, '' = none. It travels with the category sync and
+  backups in the row's `data`, so the backend needed no change.
+- Settings › Categories: tap the emoji to choose one or type your own.
+- Actual has no field for it, so an Actual category uses an emoji at the start of its name (taken off the
+  name on screen), then the linked phone category's, then one of the same name. Without any, its first
+  letter holds the column. Names stay untouched in the database and in Actual.
+- Shown in Budget, Home, the account screen, the pickers, quick add and Review. The column is the width of
+  the group's chevron, so names didn't move. Quiet rows dim theirs; screen readers skip it; no motion.
 
 ## Phase 6: Quick add offline
 

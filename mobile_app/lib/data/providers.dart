@@ -261,6 +261,15 @@ final ledgerOutboxProvider = StreamProvider.autoDispose<({int waiting, int faile
   yield* ref.watch(ledgerStoreProvider).watchOutboxSummary(scope);
 });
 
+/// How many of the phone's own accounts could go into the budget on screen;
+/// 0 while the screens show the phone's own budget.
+final phoneAccountsToMoveProvider = FutureProvider.autoDispose<int>((ref) async {
+  ref.watch(ledgerChangesProvider);
+  final scope = await ref.watch(ledgerScopeProvider.future);
+  if (scope == phoneScope) return 0;
+  return (await ref.read(ledgerStoreProvider).accounts(phoneScope)).length;
+});
+
 final ledgerApiProvider = Provider<LedgerApi>((ref) => LedgerApi(ref.watch(apiClientProvider)));
 
 final ledgerReportsProvider = Provider<LedgerReports>((ref) {
